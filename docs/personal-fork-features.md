@@ -55,10 +55,9 @@ firmware can remove both personal features, including Google Drive sync.
 
 ## Version and release policy
 
-The current stabilization baseline is **1.4.1.0** on branch
-`release/1.4.1.0`. The feature does not introduce a different version number on
-this branch: firmware metadata, branch name, and any test tag must remain aligned
-at `1.4.1.0`.
+The current stabilization baseline is **1.4.1.1** on branch
+`release/1.4.1.1`. Firmware metadata, branch name, and any test tag must remain
+aligned at `1.4.1.1`.
 
 After the dual-source OTA feature is verified stable on hardware, it will be
 ported as a distinct change to the next release branch. The next branch will be
