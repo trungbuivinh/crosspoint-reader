@@ -225,14 +225,12 @@ void SdFirmwareUpdateActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATING), true, EpdFontFamily::BOLD);
 
     int y = top + lineHeight + metrics.verticalSpacing;
+    const int progressHeight = GUI.measureProgressBar(renderer);
     GUI.drawProgressBar(
         renderer,
-        Rect{metrics.contentSidePadding, y, pageWidth - metrics.contentSidePadding * 2, metrics.progressBarHeight},
+        Rect{metrics.contentSidePadding, y, pageWidth - metrics.contentSidePadding * 2, progressHeight},
         static_cast<int>(pct), 100);
-    y += metrics.progressBarHeight + metrics.verticalSpacing;
-    // Percent label is drawn by BaseTheme::drawProgressBar; this slot is left intentionally empty
-    // so the do-not-power-off line below stays at the same Y as before.
-    y += lineHeight + metrics.verticalSpacing;
+    y += progressHeight + metrics.verticalSpacing;
     renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_FIRMWARE_UPDATE_DO_NOT_POWER_OFF));
   } else if (state == State::SUCCESS) {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATE_COMPLETE), true, EpdFontFamily::BOLD);

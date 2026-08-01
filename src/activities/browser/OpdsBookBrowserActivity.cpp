@@ -154,7 +154,8 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     auto title = renderer.truncatedText(UI_10_FONT_ID, statusMessage.c_str(), pageWidth - 40);
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 - 10, title.c_str());
     if (downloadTotal > 0) {
-      GUI.drawProgressBar(renderer, Rect{50, pageHeight / 2 + 20, pageWidth - 100, 20}, downloadProgress,
+      const int progressHeight = GUI.measureProgressBar(renderer);
+      GUI.drawProgressBar(renderer, Rect{50, pageHeight / 2 + 20, pageWidth - 100, progressHeight}, downloadProgress,
                           downloadTotal);
     }
     renderer.displayBuffer();

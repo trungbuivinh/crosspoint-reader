@@ -254,16 +254,50 @@ void GoogleDriveSyncActivity::render(RenderLock&&) {
     }
 
     case SyncState::SYNCING: {
-      renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 - 70, tr(STR_DOWNLOADING));
-      const auto title = renderer.truncatedText(UI_10_FONT_ID, currentName.c_str(), pageWidth - 40);
-      renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 - 40, title.c_str());
-      if (fileTotal > 0) {
-        GUI.drawProgressBar(renderer, Rect{50, pageHeight / 2 - 10, pageWidth - 100, 20}, fileProgress, fileTotal);
+      const auto& metrics = UITheme::getInstance().getMetrics();
+      const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+      const int titleLineHeight = renderer.getLineHeight(UI_12_FONT_ID);
+      const ProgressBarOptions progressOptions;
+      const int progressHeight = GUI.measureProgressBar(renderer, progressOptions);
+      const bool showFileProgress = fileTotal > 0;
+
+      // Lay out the complete widgets as a stack. A progress widget includes its
+      // percentage label, so no text can overlap the space below its bar.
+      int blockHeight = lineHeight * 3 + progressHeight + metrics.verticalSpacing * 3;
+      if (showFileProgress) {
+        blockHeight += progressHeight + metrics.verticalSpacing;
       }
+
+      const int safeTop = 15 + titleLineHeight + metrics.verticalSpacing;
+      const int safeBottom = pageHeight - metrics.buttonHintsHeight - metrics.verticalSpacing;
+      const int freeSpace = safeBottom - safeTop - blockHeight;
+      int y = safeTop + (freeSpace > 0 ? freeSpace / 2 : 0);
+
+      renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DOWNLOADING));
+      y += lineHeight + metrics.verticalSpacing;
+
+      const auto title = renderer.truncatedText(UI_10_FONT_ID, currentName.c_str(), pageWidth - 40);
+      renderer.drawCenteredText(UI_10_FONT_ID, y, title.c_str());
+      y += lineHeight + metrics.verticalSpacing;
+
+      if (showFileProgress) {
+        GUI.drawProgressBar(renderer,
+                            Rect{metrics.contentSidePadding, y, pageWidth - metrics.contentSidePadding * 2,
+                                 progressHeight},
+                            fileProgress, fileTotal, progressOptions);
+        y += progressHeight + metrics.verticalSpacing;
+      }
+
       snprintf(buf, sizeof(buf), tr(STR_GDRIVE_FILE_OF_FORMAT), static_cast<int>(currentIndex + 1),
                static_cast<int>(pending.size()));
-      renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 30, buf);
-      GUI.drawProgressBar(renderer, Rect{50, pageHeight / 2 + 50, pageWidth - 100, 20}, currentIndex, pending.size());
+      renderer.drawCenteredText(UI_10_FONT_ID, y, buf);
+      y += lineHeight + metrics.verticalSpacing;
+
+      GUI.drawProgressBar(renderer,
+                          Rect{metrics.contentSidePadding, y, pageWidth - metrics.contentSidePadding * 2,
+                               progressHeight},
+                          currentIndex, pending.size(), progressOptions);
+
       const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), "", "", "");
       GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
       break;
