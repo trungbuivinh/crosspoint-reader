@@ -1,41 +1,55 @@
 # Google Drive Sync
 
-Google Drive Sync is a **pull**-based transfer method: instead of pushing files
-to the device from a computer, the reader fetches books from a shared Google
-Drive folder over Wi-Fi. Drop books into the folder from any device, then run a
-one-button sync on the reader to download everything new.
+Google Drive Sync turns a link-shared Drive folder into the source of truth for
+a dedicated EPUB library folder on the reader. The reader pulls the complete
+folder hierarchy over Wi-Fi, so Drive directories can be used to classify
+books.
 
 It is the fourth mode on the **File Transfer** screen, alongside Join a Network,
 Calibre Wireless, and Create Hotspot.
 
-## How it works
+## Mirror behavior
 
-- You share one Google Drive folder as **"anyone with the link"** and create a
-  free Google API key.
-- You enter the **folder ID** and **API key** once, from the web settings page.
-- On the device, **File Transfer → Google Drive** connects to Wi-Fi, lists the
-  folder, and downloads every supported book that is missing locally or whose
-  size differs from the copy on Drive.
+The selected local folder represents the configured shared Drive folder. The
+Drive folder's children are placed directly inside it; no extra wrapper folder
+is created.
 
-There is no Google sign-in. The reader uses the public Google Drive API v3 with
-your API key, so only a link-shared folder is reachable. This is a deliberate
-constraint: Google's device-login flow cannot grant access to your private
-Drive files, and the reader keeps no account credentials.
+```text
+Drive: Shared Library/          SD card: /Books/Drive/
+├── Fiction/                    ├── Fiction/
+│   └── Dune.epub               │   └── Dune.epub
+├── Technical/                  ├── Technical/
+│   └── C++.epub                │   └── C++.epub
+└── To Read/                    └── To Read/
+```
 
-> [!IMPORTANT]
-> A folder shared as "anyone with the link" is readable by anyone who has the
-> link. Use a folder created specifically for your books, not one holding
-> private material.
+- Every Drive directory is mirrored recursively, including empty directories.
+- Only `.epub` files are downloaded. Other Drive files, Google Docs, Sheets,
+  Slides, and shortcuts are ignored.
+- The local target is a dedicated managed mirror. Any local file or directory
+  absent from the managed Drive tree is deleted after an on-device warning and
+  confirmation. This includes local non-EPUB files.
+- Local EPUB content is compared with Drive's MD5 checksum, not just file size.
+  Local edits and same-size Drive updates are therefore replaced by the Drive
+  version.
+- A successful sync means the relative directory paths, EPUB paths, and EPUB
+  contents match Drive exactly.
+- Path casing is corrected to match Drive even though the SD-card filesystem
+  itself compares names case-insensitively.
+
+> [!WARNING]
+> Do not select a folder containing files that are not managed through the
+> shared Drive library. Those files will be deleted during sync. The SD-card
+> root `/` cannot be selected.
 
 ## One-time setup
 
 ### 1. Create and share a Drive folder
 
-1. In Google Drive, create a folder for your books (for example, `CrossPoint`).
-2. Right-click the folder → **Share**.
-3. Under **General access**, change **Restricted** to **Anyone with the link**,
-   with the role **Viewer**.
-4. Copy the folder link. The **folder ID** is the last path segment:
+1. Create the Drive folder and any category subfolders you want.
+2. Right-click the root folder and choose **Share**.
+3. Set **General access** to **Anyone with the link**, role **Viewer**.
+4. Copy the folder ID from the final segment of its URL:
 
    ```text
    https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz012345
@@ -44,74 +58,68 @@ Drive files, and the reader keeps no account credentials.
 
 ### 2. Create a Google API key
 
-1. Open the [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a project (or select an existing one).
-3. Go to **APIs & Services → Library**, search for **Google Drive API**, and
-   click **Enable**.
-4. Go to **APIs & Services → Credentials → Create Credentials → API key**.
-5. Copy the generated key.
-6. (Recommended) Click the key to restrict it: under **API restrictions**,
-   choose **Restrict key** and select only **Google Drive API**. This limits
-   what the key can do if it leaks.
+1. In the [Google Cloud Console](https://console.cloud.google.com/), create or
+   select a project.
+2. Enable **Google Drive API**.
+3. Open **APIs & Services → Credentials → Create Credentials → API key**.
+4. Restrict the key to Google Drive API when possible.
 
-The free tier's default quota is far more than a personal library needs.
+There is no Google account sign-in on the reader. The API key can only access
+content made public through link sharing.
 
-### 3. Enter the configuration on the device
+### 3. Select the local mirror
 
-The folder ID and API key are long strings, so enter them from a browser rather
-than typing on the device:
+1. On the reader, open **File Transfer → Join a Network**.
+2. Open `http://<device-ip>/settings` or
+   `http://crosspoint.local/settings` from a browser.
+3. In **Google Drive Sync**, set:
+   - **Drive Folder ID**
+   - **Drive API Key**
+   - **Local Mirror Folder** — use **Choose** to browse the SD card
+4. Save settings.
 
-1. On the reader, open **File Transfer → Join a Network** and connect to Wi-Fi.
-2. In a browser on the same network, open `http://<device-ip>/settings` (the IP
-   is shown on the reader), or `http://crosspoint.local/settings`.
-3. Find the **Google Drive Sync** section and fill in:
-   - **Drive Folder ID** — the folder ID from step 1.
-   - **Drive API Key** — the key from step 2.
-4. Save. The API key is stored obfuscated on the SD card
-   (`/.crosspoint/gdrive.json`) and is never shown back in the web UI.
+The local target must already exist and cannot be `/` or a protected system
+directory. Existing installations must select a local target before their next
+sync; the previous SD-root behavior is not retained because exact mirroring can
+delete local extras.
 
-You can also create `/.crosspoint/gdrive.json` by hand, but the web page is the
-supported path and validates the values as you go.
+## Running a sync
 
-## Syncing books
+1. Open **File Transfer → Google Drive**.
+2. The reader connects to Wi-Fi, recursively lists Drive, scans the local tree,
+   and hashes matching EPUBs.
+3. Review the counts for folders to create, EPUBs to update, and local files or
+   directories to delete.
+4. Press **Start Sync**. If deletion is planned, confirm the warning.
+5. Downloads and checksum verification run first. Local extras are deleted only
+   after every download succeeds.
 
-1. On the reader, open **File Transfer → Google Drive**.
-2. The reader connects to Wi-Fi (reusing your saved networks), then lists the
-   folder and shows how many files it found and how many need downloading.
-3. Press **Start Sync**. Each file downloads in turn with a per-file and an
-   overall progress bar.
-4. Press **Back** at any time to cancel; the in-progress file is discarded
-   cleanly.
-5. When finished, the reader shows a summary: how many books were downloaded and
-   how many failed.
+Press **Back** during the download phase to cancel. Incomplete downloads are
+discarded and the deletion phase is withheld; downloads that already completed
+may remain. The result is reported as incomplete rather than successful.
 
-Books download to the SD-card root, so they appear immediately in **Browse
-Files** and **Recent Books**.
+## Limits and unsupported trees
 
-### What gets synced
-
-- Supported book formats only: `.epub`, `.txt`, `.xtc`, `.xtch`, and `.md`.
-  Other file types in the folder are ignored.
-- Google-native files (Docs, Sheets, Slides) are skipped — they have no
-  downloadable book content.
-- A file is downloaded when it is **missing** on the SD card or when the local
-  size **differs** from the copy on Drive. Files already present at the same
-  size are left alone, so re-running a sync only fetches what changed.
-- Up to 300 files are listed per sync. Larger folders are paginated; if you keep
-  more than 300 books in one folder, split them across subfolders (only the
-  configured folder's direct contents are synced — subfolders are not scanned).
-
-When a book is overwritten by a newer copy, its cached metadata is cleared so
-the reader re-parses it on next open.
+- Maximum 300 nodes per side: Drive directories/EPUBs remotely and all entries
+  inside the selected local target.
+- Maximum directory depth: 16.
+- Maximum path supported by the mirror: 240 UTF-8 bytes including the selected
+  local root.
+- A path component may use up to 100 UTF-8 bytes.
+- Duplicate names that collide on a case-insensitive FAT filesystem are
+  rejected before local changes are made.
+- Drive names that cannot be represented losslessly on FAT are rejected rather
+  than silently renamed.
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---------|--------------|
-| "Google Drive is not configured" | Folder ID or API key is empty — set both in web settings. |
-| "Failed to list Drive folder" | Folder is not shared as "anyone with the link"; wrong folder ID; API key invalid or Drive API not enabled; no internet on the joined network. |
-| A book never downloads | Unsupported extension, or it is a Google-native Doc/Sheet/Slide. |
-| Some files fail but the sync finishes | Individual download errors are skipped so one bad file does not stop the rest; the summary reports the failure count. |
+| Google Drive is not configured | Folder ID, API key, or Local Mirror Folder is missing. |
+| Failed to fetch the Drive tree | Folder is not link-shared, the ID/key is wrong, Drive API is disabled, or the network is offline. |
+| Name collision or invalid name | Two siblings differ only by case, or a Drive name is not FAT-compatible. |
+| Sync incomplete | A download, checksum, filesystem operation, or user cancellation prevented an exact result. Deletions were withheld if transfer failed. |
+| Local file disappeared | The selected target is managed by Drive; local extras are intentionally deleted after confirmation. |
 
 ## Related documentation
 

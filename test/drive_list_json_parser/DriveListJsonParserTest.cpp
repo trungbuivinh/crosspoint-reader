@@ -12,7 +12,11 @@ struct CollectedFile {
   std::string id;
   std::string name;
   std::string mimeType;
+  std::string md5Checksum;
   uint32_t size;
+  bool idTruncated;
+  bool nameTruncated;
+  bool md5Truncated;
 };
 
 struct Collector {
@@ -20,7 +24,8 @@ struct Collector {
 
   static void onFile(void* ctx, const DriveFileInfo& f) {
     auto* self = static_cast<Collector*>(ctx);
-    self->files.push_back({f.id, f.name, f.mimeType, f.size});
+    self->files.push_back(
+        {f.id, f.name, f.mimeType, f.md5Checksum, f.size, f.idTruncated, f.nameTruncated, f.md5Truncated});
   }
 };
 
@@ -35,7 +40,8 @@ const char* kRealisticPage = R"({
    "mimeType": "application/epub+zip",
    "id": "1AbCdEfGhIjKlMnOpQrStUvWxYz012345",
    "name": "Pride and Prejudice.epub",
-   "size": "1234567"
+   "size": "1234567",
+   "md5Checksum": "0123456789abcdef0123456789abcdef"
   },
   {
    "kind": "drive#file",
@@ -65,6 +71,8 @@ TEST(DriveListJsonParser, ParsesRealisticPage) {
   EXPECT_EQ(c.files[0].name, "Pride and Prejudice.epub");
   EXPECT_EQ(c.files[0].mimeType, "application/epub+zip");
   EXPECT_EQ(c.files[0].size, 1234567u);
+  EXPECT_EQ(c.files[0].md5Checksum, "0123456789abcdef0123456789abcdef");
+  EXPECT_FALSE(c.files[0].md5Truncated);
 
   // Google-native doc: no "size" key at all -> size must default to 0
   EXPECT_EQ(c.files[1].mimeType, "application/vnd.google-apps.document");
@@ -142,6 +150,24 @@ TEST(DriveListJsonParser, TruncatesOverlongName) {
   ASSERT_EQ(c.files.size(), 1u);
   EXPECT_EQ(c.files[0].name.size(), sizeof(DriveFileInfo::name) - 1);
   EXPECT_EQ(c.files[0].size, 5u);
+  EXPECT_TRUE(c.files[0].nameTruncated);
+}
+
+TEST(DriveListJsonParser, ParsesFolderAndResetsMd5BetweenEntries) {
+  Collector c;
+  DriveListJsonParser parser(&c, Collector::onFile);
+  const char* json = R"({"files":[{"id":"f1","name":"Fiction","mimeType":"application/vnd.google-apps.folder"},)"
+                     R"({"id":"b1","name":"book.epub","mimeType":"application/epub+zip","size":"2",)"
+                     R"("md5Checksum":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},)"
+                     R"({"id":"b2","name":"other.epub","mimeType":"application/epub+zip","size":"3"}]})";
+  parser.feed(json, strlen(json));
+
+  ASSERT_FALSE(parser.hasError());
+  ASSERT_EQ(c.files.size(), 3u);
+  EXPECT_EQ(c.files[0].mimeType, "application/vnd.google-apps.folder");
+  EXPECT_TRUE(c.files[0].md5Checksum.empty());
+  EXPECT_EQ(c.files[1].md5Checksum, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  EXPECT_TRUE(c.files[2].md5Checksum.empty());
 }
 
 TEST(DriveListJsonParser, SkipsFileWithoutId) {

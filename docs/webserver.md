@@ -74,11 +74,12 @@ OPDS server.
 ## Google Drive Mode
 
 Google Drive mode does not start the web server. Instead, the reader pulls books
-from a shared Google Drive folder: it connects to Wi-Fi, lists the folder, and
-downloads every supported book that is missing locally or whose size differs.
+from a shared Google Drive folder: it connects to Wi-Fi, recursively lists the
+folder tree, and makes a dedicated local EPUB tree match it exactly.
 
 Configuration (folder ID + API key) is entered from the web settings page in
-**Join Network** mode, under the **Google Drive Sync** section. For the full
+**Join Network** mode, under the **Google Drive Sync** section. Configure the
+folder ID and API key, then choose a non-root **Local Mirror Folder**. For the full
 setup and Google Cloud steps, see [google-drive-sync.md](./google-drive-sync.md).
 
 ## Web Interface
@@ -117,9 +118,10 @@ cards for:
 Passwords are accepted when adding or editing entries, but saved passwords are
 not returned by the API.
 
-The **Google Drive Sync** section holds the **Drive Folder ID** and **Drive API
-Key** used by Google Drive mode. The API key is stored obfuscated on the SD card
-and is not returned by the API after saving.
+The **Google Drive Sync** section holds the **Drive Folder ID**, **Drive API
+Key**, and web directory picker for the **Local Mirror Folder** used by Google
+Drive mode. The API key is stored obfuscated on the SD card. Treat the settings
+API as trusted local-network access because it can read configured setting values.
 
 ### Fonts
 
