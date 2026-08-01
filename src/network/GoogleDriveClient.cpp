@@ -3,6 +3,7 @@
 #include <DriveListJsonParser.h>
 #include <FsHelpers.h>
 #include <Logging.h>
+#include <Memory.h>
 
 #include <algorithm>
 #include <cctype>
@@ -91,6 +92,17 @@ DriveTreeResult listTree(const std::string& folderId, const std::string& apiKey,
   std::unordered_set<std::string> visited;
   visited.insert(folderId);
 
+  // Keep the large streaming parser off the 8 KiB Arduino loop stack and
+  // reuse both allocations for every response page. Page size is capped at
+  // 100 by the request below.
+  PageCollector collector;
+  collector.children.reserve(100);
+  auto parser = makeUniqueNoThrow<DriveListJsonParser>(&collector, collectChild);
+  if (!parser) {
+    LOG_ERR("GDRV", "OOM allocating Drive response parser");
+    return DriveTreeResult::OOM;
+  }
+
   while (!pending.empty()) {
     PendingFolder folder = std::move(pending.front());
     pending.pop_front();
@@ -109,18 +121,17 @@ DriveTreeResult listTree(const std::string& folderId, const std::string& apiKey,
         url += "&pageToken=" + UrlUtils::urlEncode(pageToken);
       }
 
-      PageCollector collector;
-      collector.children.reserve(100);
-      DriveListJsonParser parser(&collector, collectChild);
+      collector.children.clear();
+      parser->reset();
       const bool ok = HttpDownloader::fetchUrl(url, [&parser](const uint8_t* data, size_t len) {
-        parser.feed(reinterpret_cast<const char*>(data), len);
+        parser->feed(reinterpret_cast<const char*>(data), len);
         return true;
       });
       if (!ok) {
         LOG_ERR("GDRV", "Tree listing HTTP failure at %s page %d", folder.relativePath.c_str(), page);
         return DriveTreeResult::HTTP_ERROR;
       }
-      if (parser.hasError()) {
+      if (!parser->finish()) {
         LOG_ERR("GDRV", "Tree listing parse failure at %s page %d", folder.relativePath.c_str(), page);
         return DriveTreeResult::PARSE_ERROR;
       }
@@ -162,7 +173,7 @@ DriveTreeResult listTree(const std::string& folderId, const std::string& apiKey,
         }
       }
 
-      pageToken = parser.getNextPageToken();
+      pageToken = parser->getNextPageToken();
       page++;
     } while (!pageToken.empty());
   }

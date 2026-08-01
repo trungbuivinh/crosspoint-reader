@@ -211,10 +211,10 @@ void CalibreConnectActivity::render(RenderLock&&) {
       renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding, y, label.c_str());
       const int progressHeight = GUI.measureProgressBar(renderer);
       const int progressY = y + height + metrics.verticalSpacing;
-      GUI.drawProgressBar(renderer,
-                          Rect{metrics.contentSidePadding, progressY, pageWidth - metrics.contentSidePadding * 2,
-                               progressHeight},
-                          lastProgressReceived, lastProgressTotal);
+      GUI.drawProgressBar(
+          renderer,
+          Rect{metrics.contentSidePadding, progressY, pageWidth - metrics.contentSidePadding * 2, progressHeight},
+          lastProgressReceived, lastProgressTotal);
       y = progressY + progressHeight + metrics.verticalSpacing;
     }
 

@@ -130,7 +130,10 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
       return HttpDownloader::FILE_ERROR;
     }
     sink.downloaded += read;
-    if (sink.progress && sink.total > 0) sink.progress(sink.downloaded, sink.total);
+    // Progress callbacks also poll cancellation. Keep invoking them when a
+    // chunked response has no Content-Length; callers can render an
+    // indeterminate/byte-stepped progress view without losing input.
+    if (sink.progress) sink.progress(sink.downloaded, sink.total);
   }
 
   const bool complete = esp_http_client_is_complete_data_received(client);

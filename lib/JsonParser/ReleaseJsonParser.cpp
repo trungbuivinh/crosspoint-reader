@@ -37,6 +37,10 @@ void ReleaseJsonParser::reset() {
 
 void ReleaseJsonParser::feed(const char* data, size_t len) { parser.feed(data, len); }
 
+bool ReleaseJsonParser::finish() { return parser.finish(); }
+
+bool ReleaseJsonParser::hasError() const { return parser.hasError(); }
+
 bool ReleaseJsonParser::foundTag() const { return tagFound; }
 bool ReleaseJsonParser::foundFirmware() const { return firmwareFound; }
 const char* ReleaseJsonParser::getTagName() const { return tagName; }
@@ -44,7 +48,7 @@ const char* ReleaseJsonParser::getFirmwareUrl() const { return firmwareUrl; }
 size_t ReleaseJsonParser::getFirmwareSize() const { return firmwareSize; }
 
 void ReleaseJsonParser::commitAsset() {
-  if (strcmp(currentAssetName, "firmware.bin") == 0) {
+  if (strcmp(currentAssetName, "firmware.bin") == 0 && currentAssetUrl[0] != '\0' && currentAssetSize > 0) {
     memcpy(firmwareUrl, currentAssetUrl, sizeof(firmwareUrl));
     firmwareSize = currentAssetSize;
     firmwareFound = true;

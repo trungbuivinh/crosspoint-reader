@@ -33,6 +33,7 @@ constexpr size_t MAX_LOCAL_PATH_BYTES = 240;
 
 enum class DriveTreeResult {
   OK,
+  OOM,
   HTTP_ERROR,
   PARSE_ERROR,
   TOO_MANY_ENTRIES,

@@ -37,6 +37,19 @@ asset named exactly `firmware.bin`. A missing release or asset, malformed tag, o
 HTTP failure stops with **Update failed** and does not replace the running
 firmware.
 
+OTA metadata is accepted only after the complete JSON document closes cleanly.
+The asset must be non-empty and its download URL must belong to the repository
+selected on the source screen. HTTPS verifies both the certificate chain and
+hostname. The downloaded byte count must match the GitHub asset size before the
+inactive boot slot is finalized.
+
+ESP-IDF rollback remains armed through early application startup. A newly
+installed image is marked valid only after it reaches a usable UI: normally
+after storage/settings, display setup, and activity routing, or after the SD
+error screen is installed when removable media is absent. A crash before that
+checkpoint leaves the image pending so the bootloader can return to the previous
+slot.
+
 Selecting **Official** is an explicit opt-out from the personal fork. An official
 firmware can remove both personal features, including Google Drive sync.
 
@@ -57,6 +70,8 @@ For custom OTA publication, the tag must exactly match the `[crosspoint] version
 in `platformio.ini`. The release workflow builds `gh_release`, publishes a stable
 GitHub Release, and attaches the generated image as `firmware.bin`. Drafts and
 pre-releases are intentionally excluded from the `/releases/latest` channel.
+Formatting, host unit tests, cppcheck, and the release build are mandatory gates
+in the tag workflow; publication does not run after any failed gate.
 
 ## Stabilization checklist
 
@@ -65,6 +80,12 @@ pre-releases are intentionally excluded from the `/releases/latest` channel.
 - Official and Custom query their respective repositories.
 - Equal or older releases show **No update available** and cannot be installed.
 - Malformed metadata and network failures leave the installed firmware intact.
+- An asset from another repository, an empty asset, truncated JSON, or a byte
+  count mismatch is rejected before the boot partition changes.
 - A newer custom release completes download, flash, reboot, and reports the new
   version.
+- A deliberately broken test image rolls back if it crashes before the boot
+  confirmation checkpoint.
+- Interrupting a download or powering off while the inactive slot is being
+  written still boots the previously valid image.
 - Google Drive sync remains available after a custom OTA update.

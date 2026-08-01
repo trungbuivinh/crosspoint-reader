@@ -10,6 +10,7 @@ permissions:
 jobs:
   build-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
         with:
@@ -42,6 +43,31 @@ jobs:
         with:
           python-version: '3.14'
 
+      - name: Install quality-gate tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          wget -q https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 21
+          sudo apt-get update
+          sudo apt-get install -y clang-format-21 cmake ninja-build
+
+      - name: Check clang-format
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATH="/usr/lib/llvm-21/bin:$PATH" ./bin/clang-format-fix
+          git diff --exit-code
+
+      - name: Run host unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S test -B build/test -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/test
+          ctest --test-dir build/test --output-on-failure -j 2
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -58,7 +84,10 @@ jobs:
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-${{ runner.os }}-
 
-      - name: Build CrossPoint
+      - name: Run cppcheck
+        run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
+
+      - name: Build release firmware
         run: pio run -e gh_release
 
       - name: Upload Artifacts
