@@ -611,6 +611,25 @@ origin      https://github.com/<your-username>/crosspoint-reader.git (fetch/push
 upstream    https://github.com/crosspoint-reader/crosspoint-reader.git (fetch/push)
 ```
 
+### Personal Fork Purpose & Release Branching Strategy
+
+**This fork (`origin` = trungbuivinh/crosspoint-reader) is for Trung Bui's own personal device use.** There is no intent to contribute features upstream via PR. Custom features are built on top of upstream's latest **stable release** (`master`), never on `develop` (upstream's active integration branch, which carries substantial unreleased/unrelated work not wanted on the device).
+
+**Branch naming/versioning**: `release/<upstream-version>.<patch-rev>` (e.g. `release/1.4.1.0` = upstream 1.4.1 + personal patch revision 0). Bump the patch-rev for an additional personal tweak on the same upstream base; reset to `.0` when rebasing onto a new upstream stable release. Set `platformio.ini`'s `[crosspoint] version` to match exactly.
+
+**Updating to a new upstream stable release** (e.g. 1.5.0):
+```bash
+git fetch upstream
+git checkout -b release/1.5.0.0 upstream/master   # fresh branch, no rebase-in-place
+git cherry-pick <feature-commit-hash(es)>         # replay personal commit(s) onto the new base
+# bump platformio.ini [crosspoint] version, commit
+pio run -e default && pio check -e default        # verify before pushing
+git push -u origin release/1.5.0.0
+```
+Cherry-pick onto a fresh branch (not rebase-in-place) is deliberate: it never force-pushes or rewrites an already-pushed branch's history — safer for a solo workflow.
+
+**Git identity for this repo (local, not global)**: `Trung Bui <buivinhtrungqng@gmail.com>` — set via `git config --local user.name`/`user.email`; the global config elsewhere may differ. **Never add a Claude/AI co-author trailer to commits in this repo.**
+
 ### Git Operation Rules
 
 1. **Never assume branch names**:
