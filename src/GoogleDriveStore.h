@@ -12,6 +12,7 @@ class GoogleDriveStore {
   static GoogleDriveStore instance;
   std::string folderId;
   std::string apiKey;
+  std::string localFolder;
   // Set by the setters on a real value change; saveToFile() skips the SD
   // write when clear, so callers can save unconditionally (write throttling).
   mutable bool dirty = false;
@@ -33,7 +34,13 @@ class GoogleDriveStore {
   const std::string& getApiKey() const { return apiKey; }
   void setApiKey(const std::string& key);
 
-  bool isConfigured() const { return !folderId.empty() && !apiKey.empty(); }
+  const std::string& getLocalFolder() const { return localFolder; }
+  void setLocalFolder(const std::string& path);
+
+  bool hasCredentials() const { return !folderId.empty() && !apiKey.empty(); }
+  bool isConfigured() const { return hasCredentials() && !localFolder.empty(); }
+
+  static bool validateLocalFolder(const std::string& input, std::string& normalized, std::string& error);
 };
 
 // Helper macro to access the Google Drive store

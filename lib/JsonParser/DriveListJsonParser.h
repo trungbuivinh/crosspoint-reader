@@ -11,7 +11,11 @@ struct DriveFileInfo {
   char id[64];        // Drive file IDs are 28-44 chars
   char name[192];     // longer names are truncated
   char mimeType[64];  // enough to distinguish application/vnd.google-apps.* prefixes
-  uint32_t size;      // 0 when absent (Google-native docs have no size)
+  char md5Checksum[33];
+  uint32_t size;  // 0 when absent (Google-native docs have no size)
+  bool idTruncated;
+  bool nameTruncated;
+  bool md5Truncated;
 };
 
 /**
@@ -54,6 +58,7 @@ class DriveListJsonParser {
     FILE_NAME,
     FILE_MIME,
     FILE_SIZE,
+    FILE_MD5,
   };
 
   static void sOnKey(void* ctx, const char* key, size_t len);

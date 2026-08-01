@@ -104,6 +104,14 @@ inline void gdriveSetApiKey(const std::string& v) {
   GDRIVE_STORE.setApiKey(v);
   GDRIVE_STORE.saveToFile();  // no-op unless a setter changed a value
 }
+inline std::string gdriveGetLocalFolder() { return GDRIVE_STORE.getLocalFolder(); }
+inline void gdriveSetLocalFolder(const std::string& v) {
+  GDRIVE_STORE.setLocalFolder(v);
+  GDRIVE_STORE.saveToFile();
+}
+inline bool gdriveValidateLocalFolder(const std::string& input, std::string& normalized, std::string& error) {
+  return GoogleDriveStore::validateLocalFolder(input, normalized, error);
+}
 
 // Shared settings list used by both the device settings UI and the web settings API.
 // Each entry has a key (for JSON API) and category (for grouping).
@@ -244,6 +252,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                                    "gdriveFolderId", StrId::STR_GDRIVE_SYNC),
         SettingInfo::DynamicString(StrId::STR_GDRIVE_API_KEY, &gdriveGetApiKey, &gdriveSetApiKey, "gdriveApiKey",
                                    StrId::STR_GDRIVE_SYNC),
+        SettingInfo::DynamicDirectory(StrId::STR_GDRIVE_LOCAL_FOLDER, &gdriveGetLocalFolder, &gdriveSetLocalFolder,
+                                      &gdriveValidateLocalFolder, "gdriveLocalFolder", StrId::STR_GDRIVE_SYNC),
         // --- Status Bar Settings (web-only, uses StatusBarSettingsActivity) ---
         SettingInfo::Toggle(StrId::STR_CHAPTER_PAGE_COUNT, &CrossPointSettings::statusBarChapterPageCount,
                             "statusBarChapterPageCount", StrId::STR_CUSTOMISE_STATUS_BAR),

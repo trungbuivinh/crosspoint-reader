@@ -25,7 +25,7 @@ CrossPoint is open-source e-reader firmware - community-built, fully hackable, f
 - **Wireless workflows**:
   
   - File transfer web UI
-  - Google Drive sync (pull books from a shared Drive folder)
+  - Google Drive EPUB mirror (recursive folders, checksum updates, and Drive-managed deletion)
   - EPUB Optimizer
   - Web settings UI/API (edit many device settings from browser)
   - WebSocket fast uploads

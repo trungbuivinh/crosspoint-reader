@@ -162,13 +162,13 @@ Books cannot be removed from your device through Calibre. Use the web interface 
 
 ### 3.5.2 Google Drive Sync
 
-Google Drive Sync **pulls** books from a shared Google Drive folder over Wi-Fi, rather than pushing them from a computer. Drop books into the folder from anywhere, then run a one-button sync on the reader.
+Google Drive Sync recursively mirrors a shared Google Drive EPUB library to a dedicated folder on the SD card. Drive directories are preserved so they can be used to classify books, and Drive remains the source of truth for additions, updates, moves, and deletions.
 
 **One-time setup:**
 
 1. In Google Drive, share a folder as **Anyone with the link** (Viewer) and copy its **folder ID** (the last segment of the folder URL).
 2. In the [Google Cloud Console](https://console.cloud.google.com/), enable the **Google Drive API** and create an **API key**.
-3. On the reader, open **File Transfer → Join a Network**, connect to Wi-Fi, then in a browser open `http://<device-ip>/settings` and fill in **Drive Folder ID** and **Drive API Key** under the **Google Drive Sync** section.
+3. On the reader, open **File Transfer → Join a Network**, connect to Wi-Fi, then in a browser open `http://<device-ip>/settings`. Fill in **Drive Folder ID** and **Drive API Key**, then use **Local Mirror Folder → Choose** to select a dedicated non-root SD-card directory.
 
 **Syncing:**
 
@@ -178,9 +178,11 @@ Google Drive Sync **pulls** books from a shared Google Drive folder over Wi-Fi, 
 
 Behavior notes:
 
-- Only `.epub`, `.txt`, `.xtc`, `.xtch`, and `.md` files are synced. Google-native Docs/Sheets/Slides are skipped.
-- A file is downloaded when it is missing locally or its size differs from Drive, so re-running a sync only fetches what changed.
-- Books download to the SD-card root and appear immediately in Browse Files.
+- Only `.epub` files are mirrored. Other file types, including Google-native Docs/Sheets/Slides, are skipped.
+- An EPUB is downloaded when it is missing locally or its size/Drive MD5 differs, so same-size edits are detected.
+- The selected local folder mirrors all Drive directories and `.epub` files recursively.
+- Files and directories present only in the local target are deleted after preview and confirmation; do not use a folder containing unmanaged data.
+- Downloads are verified by size and Drive MD5. Failed or cancelled transfers prevent local deletion.
 - No Google sign-in is used; only a link-shared folder is reachable, and the API key is stored obfuscated on the SD card.
 
 For full setup instructions, Google Cloud steps, and troubleshooting, see the [Google Drive Sync guide](./docs/google-drive-sync.md).

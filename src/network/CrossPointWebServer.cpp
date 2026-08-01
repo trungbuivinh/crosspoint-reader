@@ -9,6 +9,7 @@
 #include <esp_task_wdt.h>
 
 #include <algorithm>
+#include <unordered_map>
 
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
@@ -1171,6 +1172,13 @@ void CrossPointWebServer::handleGetSettings() const {
         }
         break;
       }
+      case SettingType::DIRECTORY: {
+        doc["type"] = "directory";
+        if (s.stringGetter) {
+          doc["value"] = s.stringGetter();
+        }
+        break;
+      }
       default:
         continue;
     }
@@ -1209,6 +1217,22 @@ void CrossPointWebServer::handlePostSettings() {
   }
 
   const auto& settings = getSettingsList(&sdFontSystem.registry());
+  std::unordered_map<std::string, std::string> normalizedDirectories;
+  for (const auto& s : settings) {
+    if (!s.key || s.type != SettingType::DIRECTORY || !doc[s.key].is<JsonVariant>()) continue;
+    if (!doc[s.key].is<const char*>() && !doc[s.key].is<std::string>()) {
+      server->send(400, "text/plain", String("Invalid directory value for ") + s.key);
+      return;
+    }
+    const std::string input = doc[s.key].as<std::string>();
+    std::string normalized = input;
+    std::string validationError;
+    if (s.stringValidator && !s.stringValidator(input, normalized, validationError)) {
+      server->send(400, "text/plain", validationError.c_str());
+      return;
+    }
+    normalizedDirectories.emplace(s.key, std::move(normalized));
+  }
   int applied = 0;
 
   for (const auto& s : settings) {
@@ -1258,6 +1282,14 @@ void CrossPointWebServer::handlePostSettings() {
           ptr[s.stringMaxLen - 1] = '\0';
         }
         applied++;
+        break;
+      }
+      case SettingType::DIRECTORY: {
+        const auto normalized = normalizedDirectories.find(s.key);
+        if (normalized != normalizedDirectories.end() && s.stringSetter) {
+          s.stringSetter(normalized->second);
+          applied++;
+        }
         break;
       }
       default:

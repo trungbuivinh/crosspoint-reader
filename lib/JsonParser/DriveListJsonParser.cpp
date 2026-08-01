@@ -5,10 +5,11 @@
 
 namespace {
 
-void safeCopy(char* dst, size_t dstSize, const char* src, size_t srcLen) {
+bool safeCopy(char* dst, size_t dstSize, const char* src, size_t srcLen) {
   size_t n = srcLen < dstSize - 1 ? srcLen : dstSize - 1;
   memcpy(dst, src, n);
   dst[n] = '\0';
+  return srcLen >= dstSize;
 }
 
 }  // namespace
@@ -31,7 +32,11 @@ void DriveListJsonParser::reset() {
   current.id[0] = '\0';
   current.name[0] = '\0';
   current.mimeType[0] = '\0';
+  current.md5Checksum[0] = '\0';
   current.size = 0;
+  current.idTruncated = false;
+  current.nameTruncated = false;
+  current.md5Truncated = false;
 }
 
 void DriveListJsonParser::feed(const char* data, size_t len) { parser.feed(data, len); }
@@ -43,7 +48,11 @@ void DriveListJsonParser::commitFile() {
   current.id[0] = '\0';
   current.name[0] = '\0';
   current.mimeType[0] = '\0';
+  current.md5Checksum[0] = '\0';
   current.size = 0;
+  current.idTruncated = false;
+  current.nameTruncated = false;
+  current.md5Truncated = false;
 }
 
 // -- SAX callbacks (static trampolines) --------------------------------------
@@ -72,6 +81,8 @@ void DriveListJsonParser::sOnKey(void* ctx, const char* key, size_t len) {
           self->lastKey = LastKey::FILE_MIME;
         else if (len == 4 && memcmp(key, "size", 4) == 0)
           self->lastKey = LastKey::FILE_SIZE;
+        else if (len == 11 && memcmp(key, "md5Checksum", 11) == 0)
+          self->lastKey = LastKey::FILE_MD5;
         else
           self->lastKey = LastKey::NONE;
       }
@@ -91,11 +102,11 @@ void DriveListJsonParser::sOnString(void* ctx, const char* value, size_t len) {
       break;
     case LastKey::FILE_ID:
       if (self->position == Position::IN_FILE_OBJECT && self->fileDepth == 1)
-        safeCopy(self->current.id, sizeof(self->current.id), value, len);
+        self->current.idTruncated = safeCopy(self->current.id, sizeof(self->current.id), value, len);
       break;
     case LastKey::FILE_NAME:
       if (self->position == Position::IN_FILE_OBJECT && self->fileDepth == 1)
-        safeCopy(self->current.name, sizeof(self->current.name), value, len);
+        self->current.nameTruncated = safeCopy(self->current.name, sizeof(self->current.name), value, len);
       break;
     case LastKey::FILE_MIME:
       if (self->position == Position::IN_FILE_OBJECT && self->fileDepth == 1)
@@ -105,6 +116,10 @@ void DriveListJsonParser::sOnString(void* ctx, const char* value, size_t len) {
       // Drive API v3 sends "size" as a JSON string, e.g. "size": "12345"
       if (self->position == Position::IN_FILE_OBJECT && self->fileDepth == 1)
         self->current.size = static_cast<uint32_t>(strtoul(value, nullptr, 10));
+      break;
+    case LastKey::FILE_MD5:
+      if (self->position == Position::IN_FILE_OBJECT && self->fileDepth == 1)
+        self->current.md5Truncated = safeCopy(self->current.md5Checksum, sizeof(self->current.md5Checksum), value, len);
       break;
     default:
       break;
@@ -142,7 +157,11 @@ void DriveListJsonParser::sOnObjectStart(void* ctx) {
       self->current.id[0] = '\0';
       self->current.name[0] = '\0';
       self->current.mimeType[0] = '\0';
+      self->current.md5Checksum[0] = '\0';
       self->current.size = 0;
+      self->current.idTruncated = false;
+      self->current.nameTruncated = false;
+      self->current.md5Truncated = false;
       self->lastKey = LastKey::NONE;
       break;
     case Position::IN_FILE_OBJECT:

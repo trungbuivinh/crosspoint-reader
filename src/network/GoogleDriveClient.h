@@ -4,11 +4,19 @@
 #include <string>
 #include <vector>
 
-// One downloadable, supported file from the configured Drive folder.
-struct DriveFileEntry {
+enum class DriveNodeType : uint8_t { DIRECTORY, EPUB };
+
+struct DriveNode {
+  DriveNodeType type;
   std::string id;
   std::string name;
-  uint32_t size;
+  std::string relativePath;
+  uint32_t size = 0;
+  std::string md5Checksum;
+};
+
+struct DriveTree {
+  std::vector<DriveNode> nodes;
 };
 
 /**
@@ -18,17 +26,29 @@ struct DriveFileEntry {
  */
 namespace GoogleDriveClient {
 
-// Hard cap on collected entries. RAM bound: ~150 B/entry (two heap strings
-// + 4 B) -> ~45 KB worst case, kept because entries persist through the
-// whole sync while TLS sessions come and go.
-constexpr size_t MAX_FILES = 300;
+constexpr size_t MAX_TREE_ENTRIES = 300;
+constexpr size_t MAX_TREE_DEPTH = 16;
+constexpr size_t MAX_COMPONENT_BYTES = 100;
+constexpr size_t MAX_LOCAL_PATH_BYTES = 240;
+
+enum class DriveTreeResult {
+  OK,
+  HTTP_ERROR,
+  PARSE_ERROR,
+  TOO_MANY_ENTRIES,
+  TOO_DEEP,
+  PATH_TOO_LONG,
+  INVALID_NAME,
+  NAME_COLLISION,
+  CYCLE_DETECTED,
+};
 
 /**
- * Lists the folder (paginated, pageSize=100), keeping only supported book
- * extensions and skipping Google-native docs (no binary content). Results
- * are appended to `out` (cleared first). Returns false on HTTP/parse error.
+ * Recursively lists a Drive folder. Every directory and direct EPUB child is
+ * retained; other file types are ignored. The configured Drive folder maps to
+ * the local sync root, so returned paths are relative to that root.
  */
-bool listFolder(const std::string& folderId, const std::string& apiKey, std::vector<DriveFileEntry>& out);
+DriveTreeResult listTree(const std::string& folderId, const std::string& apiKey, DriveTree& out);
 
 /** Direct-download URL for a file (alt=media). */
 std::string downloadUrl(const std::string& fileId, const std::string& apiKey);
