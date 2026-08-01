@@ -66,9 +66,7 @@ void GoogleDriveSyncActivity::onEnter() {
     state = SyncState::CHECK_WIFI;
     phase = SyncPhase::RENAME_PATHS;
     remoteTree.nodes.clear();
-    remoteTree.nodes.reserve(GoogleDriveClient::MAX_TREE_ENTRIES);
     localTree.clear();
-    localTree.reserve(GoogleDriveClient::MAX_TREE_ENTRIES);
     plan = {};
     conflictBackups.clear();
     phaseIndex = 0;
@@ -82,7 +80,6 @@ void GoogleDriveSyncActivity::onEnter() {
     fileTotal = 0;
     cancelRequested = false;
     errorMessage.clear();
-    driveTreeFailure = {};
     lastRenderedFilePercent = -1;
     lastRenderedProgressBytes = 0;
   }
@@ -146,17 +143,10 @@ void GoogleDriveSyncActivity::onWifiSelectionComplete(const bool connected) {
   }
 }
 
-std::string GoogleDriveSyncActivity::driveErrorMessage(const GoogleDriveClient::DriveTreeResult result,
-                                                       const HttpRequestDiagnostics::FailureDetails& failureDetails) {
+std::string GoogleDriveSyncActivity::driveErrorMessage(const GoogleDriveClient::DriveTreeResult result) {
   switch (result) {
-    case GoogleDriveClient::DriveTreeResult::HTTP_ERROR: {
-      char message[128];
-      snprintf(message, sizeof(message), "%s [%s, HTTP %d, err %d]", tr(STR_GDRIVE_ERR_FETCH_TREE),
-               HttpRequestDiagnostics::failureStageName(failureDetails.stage), failureDetails.httpStatus,
-               failureDetails.transportError);
-      // Terminal error path only: the activity keeps this owning message for the retry screen.
-      return message;
-    }
+    case GoogleDriveClient::DriveTreeResult::HTTP_ERROR:
+      return tr(STR_GDRIVE_ERR_FETCH_TREE);
     case GoogleDriveClient::DriveTreeResult::OOM:
       return tr(STR_GDRIVE_ERR_MEMORY);
     case GoogleDriveClient::DriveTreeResult::PARSE_ERROR:
@@ -179,20 +169,32 @@ std::string GoogleDriveSyncActivity::driveErrorMessage(const GoogleDriveClient::
   return tr(STR_GDRIVE_ERR_LIST_TREE);
 }
 
+void GoogleDriveSyncActivity::releaseTreeStorageBeforeListing() {
+  // A retry may follow local analysis, when both vectors have their full
+  // 300-entry capacity. Release those backing blocks before the next TLS
+  // handshake; clear() alone preserves capacity and reproduced the PR #6
+  // regression on retry.
+  std::vector<DriveNode>{}.swap(remoteTree.nodes);
+  std::vector<LocalDriveNode>{}.swap(localTree);
+  plan = {};
+  std::vector<ConflictBackup>{}.swap(conflictBackups);
+  md5Buffer.reset();
+}
+
 void GoogleDriveSyncActivity::startListing() {
   {
     RenderLock lock(*this);
     state = SyncState::LISTING;
   }
+  releaseTreeStorageBeforeListing();
   requestUpdate(true);
 
-  const auto result =
-      GoogleDriveClient::listTree(GDRIVE_STORE.getFolderId(), GDRIVE_STORE.getApiKey(), remoteTree, &driveTreeFailure);
+  const auto result = GoogleDriveClient::listTree(GDRIVE_STORE.getFolderId(), GDRIVE_STORE.getApiKey(), remoteTree);
   if (result != GoogleDriveClient::DriveTreeResult::OK) {
     {
       RenderLock lock(*this);
       state = SyncState::ERROR;
-      errorMessage = driveErrorMessage(result, driveTreeFailure);
+      errorMessage = driveErrorMessage(result);
     }
     requestUpdate();
     return;
@@ -376,6 +378,10 @@ bool GoogleDriveSyncActivity::recoverArtifacts() {
 
 bool GoogleDriveSyncActivity::scanLocalTree() {
   localTree.clear();
+  // listTree() has returned and every HTTP/TLS client has been cleaned up.
+  // Reserve the bounded local snapshot here so its 16,800-byte backing block
+  // never competes with a TLS handshake.
+  localTree.reserve(GoogleDriveClient::MAX_TREE_ENTRIES);
   std::vector<std::pair<std::string, std::string>> directories{{GDRIVE_STORE.getLocalFolder(), ""}};
 
   while (!directories.empty()) {

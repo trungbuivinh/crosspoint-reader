@@ -118,8 +118,11 @@ transfer, while the Cancel button continues to be polled for chunked responses.
 - Drive names that cannot be represented losslessly on FAT are rejected rather
   than silently renamed.
 - Parser and checksum scratch storage is bounded and allocated with explicit
-  out-of-memory handling; the activity preallocates its two 300-entry tree
-  arrays before Wi-Fi/TLS starts to reduce fragmentation.
+  out-of-memory handling. Remote listing starts with a small tree capacity and
+  grows it in bounded steps only after each HTTPS client has been cleaned up;
+  the full local-tree capacity is allocated only after remote listing finishes.
+  Retry also releases retained tree capacity before opening another TLS
+  connection.
 
 ## Troubleshooting
 
@@ -130,12 +133,6 @@ transfer, while the Cancel button continues to be polled for chunked responses.
 | Name collision or invalid name | Two siblings differ only by case, or a Drive name is not FAT-compatible. |
 | Sync incomplete | A download, checksum, filesystem operation, or user cancellation prevented an exact result. Deletions were withheld if transfer failed. |
 | Local file disappeared | The selected target is managed by Drive; local extras are intentionally deleted after confirmation. |
-
-The personal diagnostic build adds the HTTP stage, HTTP status, and transport
-error to the Drive-tree error screen. Its serial log also records the first 191
-bytes of a non-200 server response, which lets the owner distinguish a bad API
-key, sharing restriction, quota problem, or TLS/network failure without
-approving a mirror plan.
 
 ## Related documentation
 
