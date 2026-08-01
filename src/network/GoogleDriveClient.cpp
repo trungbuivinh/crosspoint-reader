@@ -18,6 +18,12 @@
 
 namespace {
 
+// Keep the initial remote snapshot small while Wi-Fi/TLS is active. On the
+// ESP32-C3, 64 DriveNode slots use 6,656 bytes; reserving all 300 slots here,
+// together with the local tree, consumed 48,000 bytes before TLS in PR #6.
+constexpr size_t INITIAL_REMOTE_TREE_RESERVE = 64;
+constexpr size_t REMOTE_TREE_RESERVE_STEP = 64;
+
 constexpr char DRIVE_FILES_URL[] = "https://www.googleapis.com/drive/v3/files";
 constexpr char DRIVE_FOLDER_MIME[] = "application/vnd.google-apps.folder";
 constexpr char GOOGLE_APPS_PREFIX[] = "application/vnd.google-apps.";
@@ -83,11 +89,9 @@ bool isGoogleNative(const ParsedChild& child) { return child.mimeType.rfind(GOOG
 
 namespace GoogleDriveClient {
 
-DriveTreeResult listTree(const std::string& folderId, const std::string& apiKey, DriveTree& out,
-                         HttpRequestDiagnostics::FailureDetails* failureDetails) {
+DriveTreeResult listTree(const std::string& folderId, const std::string& apiKey, DriveTree& out) {
   out.nodes.clear();
-  out.nodes.reserve(64);
-  if (failureDetails) *failureDetails = {};
+  out.nodes.reserve(INITIAL_REMOTE_TREE_RESERVE);
 
   std::deque<PendingFolder> pending;
   pending.push_back({folderId, "", 0});
@@ -125,25 +129,33 @@ DriveTreeResult listTree(const std::string& folderId, const std::string& apiKey,
 
       collector.children.clear();
       parser->reset();
-      const bool ok = HttpDownloader::fetchUrl(
-          url,
-          [&parser](const uint8_t* data, size_t len) {
-            parser->feed(reinterpret_cast<const char*>(data), len);
-            return true;
-          },
-          "", "", failureDetails);
+      const bool ok = HttpDownloader::fetchUrl(url, [&parser](const uint8_t* data, size_t len) {
+        parser->feed(reinterpret_cast<const char*>(data), len);
+        return true;
+      });
       if (!ok) {
-        const auto stage = failureDetails ? HttpRequestDiagnostics::failureStageName(failureDetails->stage) : "unknown";
-        const int status = failureDetails ? failureDetails->httpStatus : 0;
-        const int transportError = failureDetails ? failureDetails->transportError : 0;
-        const size_t receivedBytes = failureDetails ? failureDetails->receivedBytes : 0;
-        LOG_ERR("GDRV", "Tree listing failure at %s page %d: stage=%s http=%d err=%d bytes=%zu",
-                folder.relativePath.c_str(), page, stage, status, transportError, receivedBytes);
+        LOG_ERR("GDRV", "Tree listing HTTP failure at %s page %d", folder.relativePath.c_str(), page);
         return DriveTreeResult::HTTP_ERROR;
       }
       if (!parser->finish()) {
         LOG_ERR("GDRV", "Tree listing parse failure at %s page %d", folder.relativePath.c_str(), page);
         return DriveTreeResult::PARSE_ERROR;
+      }
+
+      const size_t managedChildCount = static_cast<size_t>(std::count_if(
+          collector.children.begin(), collector.children.end(),
+          [](const ParsedChild& child) { return isFolder(child) || (!isGoogleNative(child) && isEpub(child)); }));
+      if (managedChildCount > MAX_TREE_ENTRIES - out.nodes.size()) {
+        return DriveTreeResult::TOO_MANY_ENTRIES;
+      }
+      const size_t requiredCapacity = out.nodes.size() + managedChildCount;
+      if (requiredCapacity > out.nodes.capacity()) {
+        // fetchUrl() has already cleaned up its HTTP/TLS client. Grow in bounded
+        // steps here so std::vector never jumps from 256 to a wasteful 512 slots
+        // while the public tree limit is 300.
+        const size_t roundedCapacity =
+            ((requiredCapacity + REMOTE_TREE_RESERVE_STEP - 1) / REMOTE_TREE_RESERVE_STEP) * REMOTE_TREE_RESERVE_STEP;
+        out.nodes.reserve(std::min(roundedCapacity, MAX_TREE_ENTRIES));
       }
 
       for (const auto& child : collector.children) {

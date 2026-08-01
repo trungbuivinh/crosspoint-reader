@@ -38,7 +38,10 @@ audit script only after verifying equivalence.
 
 - Route storage through `Storage`/`HalStorage` and `HalFile`; never bypass its SD
   mutex with direct SdFat access.
-- Pre-reserve both bounded tree containers before Wi-Fi/TLS allocation.
+- Start remote listing with a small tree capacity and grow it in bounded steps
+  only after each HTTPS client is cleaned up. Allocate the full bounded
+  local-tree capacity only after remote listing finishes, and release retained
+  tree capacity before a retry.
 - Allocate parser and reusable checksum/download scratch with no-throw helpers,
   null-check OOM, and avoid large loop-task stack buffers.
 - Do not allocate in render or per-chunk hot paths. Avoid repeated temporary

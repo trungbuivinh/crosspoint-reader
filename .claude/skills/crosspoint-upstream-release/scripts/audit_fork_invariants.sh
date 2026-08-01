@@ -32,6 +32,26 @@ require_text() {
   fi
 }
 
+require_order() {
+  local first="$1"
+  local second="$2"
+  local file="$3"
+  local label="$4"
+  local first_line=""
+  local second_line=""
+
+  if [[ -f "${file}" ]]; then
+    first_line="$(awk -v needle="${first}" 'index($0, needle) { print NR; exit }' "${file}")"
+    second_line="$(awk -v needle="${second}" 'index($0, needle) { print NR; exit }' "${file}")"
+  fi
+
+  if [[ -n "${first_line}" && -n "${second_line}" && "${first_line}" -lt "${second_line}" ]]; then
+    pass "${label}"
+  else
+    fail "${label}"
+  fi
+}
+
 reject_text() {
   local text="$1"
   local label="$2"
@@ -118,10 +138,20 @@ require_text 'GOOGLE_DRIVE' src/activities/network/NetworkModeSelectionActivity.
 require_text 'gdriveLocalFolder' src/SettingsList.h 'Google Drive local mirror setting remains exposed'
 require_text 'constexpr size_t MAX_TREE_ENTRIES = 300' src/network/GoogleDriveClient.h \
   'Drive tree remains explicitly bounded'
-require_text 'remoteTree.nodes.reserve(GoogleDriveClient::MAX_TREE_ENTRIES)' \
-  src/activities/network/GoogleDriveSyncActivity.cpp 'remote Drive tree is reserved before sync'
+require_text 'constexpr size_t INITIAL_REMOTE_TREE_RESERVE = 64' \
+  src/network/GoogleDriveClient.cpp 'remote Drive tree keeps a small initial TLS-time reserve'
+require_text 'constexpr size_t REMOTE_TREE_RESERVE_STEP = 64' \
+  src/network/GoogleDriveClient.cpp 'remote Drive capacity grows in bounded post-request steps'
 require_text 'localTree.reserve(GoogleDriveClient::MAX_TREE_ENTRIES)' \
-  src/activities/network/GoogleDriveSyncActivity.cpp 'local Drive tree is reserved before sync'
+  src/activities/network/GoogleDriveSyncActivity.cpp 'local Drive tree is reserved after remote listing'
+require_text 'releaseTreeStorageBeforeListing();' \
+  src/activities/network/GoogleDriveSyncActivity.cpp 'retained tree capacity is released before listing retries'
+require_order 'releaseTreeStorageBeforeListing();' 'GoogleDriveClient::listTree(' \
+  src/activities/network/GoogleDriveSyncActivity.cpp 'retained tree capacity is released before remote HTTPS listing'
+require_order 'GoogleDriveClient::listTree(' 'localTree.reserve(GoogleDriveClient::MAX_TREE_ENTRIES)' \
+  src/activities/network/GoogleDriveSyncActivity.cpp 'local Drive capacity is allocated after remote HTTPS listing'
+require_order 'const bool ok = HttpDownloader::fetchUrl' 'out.nodes.reserve(std::min' \
+  src/network/GoogleDriveClient.cpp 'remote Drive capacity grows only after the HTTPS request returns'
 require_text 'makeUniqueNoThrow<DriveListJsonParser>' src/network/GoogleDriveClient.cpp \
   'Drive response parser has fallible heap allocation'
 require_text 'PART_SUFFIX[] = ".gdrive.part"' src/activities/network/GoogleDriveSyncActivity.cpp \

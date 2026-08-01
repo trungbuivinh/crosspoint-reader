@@ -34,24 +34,6 @@ struct Sink {
   size_t downloaded = 0;
 };
 
-void recordFailure(HttpDownloader::FailureDetails* details, const HttpDownloader::FailureStage stage,
-                   const int httpStatus, const int transportError, const size_t receivedBytes) {
-  if (!details) return;
-  details->stage = stage;
-  details->httpStatus = httpStatus;
-  details->transportError = transportError;
-  details->receivedBytes = receivedBytes;
-}
-
-void captureServerMessage(esp_http_client_handle_t client, HttpDownloader::FailureDetails* details) {
-  if (!details) return;
-  const int read = esp_http_client_read(client, details->serverMessage, sizeof(details->serverMessage) - 1);
-  if (read > 0) {
-    details->serverMessage[read] = '\0';
-    details->receivedBytes += static_cast<size_t>(read);
-  }
-}
-
 bool isRedirect(int status) {
   return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
 }
@@ -62,9 +44,7 @@ bool isRedirect(int status) {
 // that ends early as ESP_ERR_HTTP_INCOMPLETE_DATA, whereas the read loop streams
 // large/slow files and surfaces a short read directly.
 HttpDownloader::DownloadError runGet(const std::string& url, const std::string& username, const std::string& password,
-                                     Sink& sink, HttpDownloader::FailureDetails* failureDetails = nullptr) {
-  if (failureDetails) *failureDetails = {};
-
+                                     Sink& sink) {
   esp_http_client_config_t config = {};
   config.url = url.c_str();
   config.buffer_size = HTTP_RX_BUF;
@@ -82,7 +62,6 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
   esp_http_client_handle_t client = esp_http_client_init(&config);
   if (!client) {
     LOG_ERR("HTTP", "client init failed");
-    recordFailure(failureDetails, HttpDownloader::FailureStage::CLIENT_INIT, 0, ESP_FAIL, sink.downloaded);
     return HttpDownloader::HTTP_ERROR;
   }
 
@@ -100,7 +79,6 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
   esp_err_t err = esp_http_client_open(client, 0);
   if (err != ESP_OK) {
     LOG_ERR("HTTP", "open failed: %s", esp_err_to_name(err));
-    recordFailure(failureDetails, HttpDownloader::FailureStage::OPEN, 0, err, sink.downloaded);
     esp_http_client_cleanup(client);
     return HttpDownloader::HTTP_ERROR;
   }
@@ -108,8 +86,6 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
   int status = esp_http_client_get_status_code(client);
   if (contentLength < 0) {
     LOG_ERR("HTTP", "fetch headers failed: %lld", contentLength);
-    recordFailure(failureDetails, HttpDownloader::FailureStage::HEADERS, status, static_cast<int>(contentLength),
-                  sink.downloaded);
     esp_http_client_cleanup(client);
     return HttpDownloader::HTTP_ERROR;
   }
@@ -117,14 +93,12 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     const esp_err_t redirectErr = esp_http_client_set_redirection(client);
     if (redirectErr != ESP_OK) {
       LOG_ERR("HTTP", "redirect setup failed: %s", esp_err_to_name(redirectErr));
-      recordFailure(failureDetails, HttpDownloader::FailureStage::REDIRECT, status, redirectErr, sink.downloaded);
       esp_http_client_cleanup(client);
       return HttpDownloader::HTTP_ERROR;
     }
     err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
       LOG_ERR("HTTP", "redirect open failed: %s", esp_err_to_name(err));
-      recordFailure(failureDetails, HttpDownloader::FailureStage::REDIRECT, status, err, sink.downloaded);
       esp_http_client_cleanup(client);
       return HttpDownloader::HTTP_ERROR;
     }
@@ -132,8 +106,6 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     status = esp_http_client_get_status_code(client);
     if (contentLength < 0) {
       LOG_ERR("HTTP", "redirect headers failed: %lld", contentLength);
-      recordFailure(failureDetails, HttpDownloader::FailureStage::HEADERS, status, static_cast<int>(contentLength),
-                    sink.downloaded);
       esp_http_client_cleanup(client);
       return HttpDownloader::HTTP_ERROR;
     }
@@ -141,11 +113,6 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
 
   if (status != 200) {
     LOG_ERR("HTTP", "unexpected status: %d", status);
-    recordFailure(failureDetails, HttpDownloader::FailureStage::HTTP_STATUS, status, 0, sink.downloaded);
-    captureServerMessage(client, failureDetails);
-    if (failureDetails && failureDetails->serverMessage[0] != '\0') {
-      LOG_ERR("HTTP", "server response: %s", failureDetails->serverMessage);
-    }
     esp_http_client_cleanup(client);
     return HttpDownloader::HTTP_ERROR;
   }
@@ -157,7 +124,6 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
   auto buf = makeUniqueNoThrow<char[]>(READ_CHUNK);
   if (!buf) {
     LOG_ERR("HTTP", "OOM: %u byte read buffer", (unsigned)READ_CHUNK);
-    recordFailure(failureDetails, HttpDownloader::FailureStage::OOM, status, ESP_ERR_NO_MEM, sink.downloaded);
     esp_http_client_cleanup(client);
     return HttpDownloader::HTTP_ERROR;
   }
@@ -170,13 +136,11 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     const int read = esp_http_client_read(client, buf.get(), READ_CHUNK);
     if (read < 0) {
       LOG_ERR("HTTP", "read error after %zu bytes", sink.downloaded);
-      recordFailure(failureDetails, HttpDownloader::FailureStage::READ, status, read, sink.downloaded);
       esp_http_client_cleanup(client);
       return HttpDownloader::HTTP_ERROR;
     }
     if (read == 0) break;  // all data received
     if (!sink.write(reinterpret_cast<const uint8_t*>(buf.get()), read)) {
-      recordFailure(failureDetails, HttpDownloader::FailureStage::SINK, status, 0, sink.downloaded);
       esp_http_client_cleanup(client);
       return HttpDownloader::FILE_ERROR;
     }
@@ -191,7 +155,6 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
   esp_http_client_cleanup(client);
   if (!complete) {
     LOG_ERR("HTTP", "incomplete: got %zu of %zu bytes", sink.downloaded, sink.total);
-    recordFailure(failureDetails, HttpDownloader::FailureStage::INCOMPLETE, status, 0, sink.downloaded);
     return HttpDownloader::HTTP_ERROR;
   }
   return HttpDownloader::OK;
@@ -219,11 +182,11 @@ bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent, c
 }
 
 bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData, const std::string& username,
-                              const std::string& password, FailureDetails* failureDetails) {
+                              const std::string& password) {
   LOG_DBG("HTTP", "Fetching: %s", url.c_str());
   Sink sink;
   sink.write = onData;
-  return runGet(url, username, password, sink, failureDetails) == OK;
+  return runGet(url, username, password, sink) == OK;
 }
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
