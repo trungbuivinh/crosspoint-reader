@@ -18,6 +18,10 @@ struct Rect {
   explicit Rect(int x = 0, int y = 0, int width = 0, int height = 0) : x(x), y(y), width(width), height(height) {}
 };
 
+struct ProgressBarOptions {
+  bool showPercentage = true;
+};
+
 struct TabInfo {
   const char* label;
   bool selected;
@@ -58,6 +62,7 @@ struct ThemeMetrics {
   int sideButtonHintsWidth;
 
   int progressBarHeight;
+  int progressBarLabelGap;
   int progressBarMarginTop;
   int statusBarHorizontalMargin;
   int statusBarVerticalMargin;
@@ -134,6 +139,7 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .buttonHintsHeight = 40,
                                  .sideButtonHintsWidth = 30,
                                  .progressBarHeight = 16,
+                                 .progressBarLabelGap = 15,
                                  .progressBarMarginTop = 1,
                                  .statusBarHorizontalMargin = 5,
                                  .statusBarVerticalMargin = 19,
@@ -178,7 +184,15 @@ class BaseTheme {
   virtual ~BaseTheme() = default;
 
   // Component drawing methods
-  void drawProgressBar(const GfxRenderer& renderer, Rect rect, size_t current, size_t total) const;
+  /** Full height needed for a progress bar, including its optional percentage label. */
+  int measureProgressBar(const GfxRenderer& renderer, ProgressBarOptions options = {}) const;
+
+  /**
+   * Draw a progress bar entirely inside `bounds`. Pass a height from
+   * measureProgressBar() when the percentage label is enabled.
+   */
+  void drawProgressBar(const GfxRenderer& renderer, Rect bounds, size_t current, size_t total,
+                       ProgressBarOptions options = {}) const;
   void drawBatteryLeft(const GfxRenderer& renderer, Rect rect,
                        bool showPercentage = true) const;  // Left aligned (reader mode)
   void drawBatteryRight(const GfxRenderer& renderer, Rect rect,

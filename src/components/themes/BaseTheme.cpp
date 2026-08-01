@@ -130,28 +130,58 @@ void BaseTheme::drawBatteryRight(const GfxRenderer& renderer, Rect rect, const b
   fillBatteryIcon(renderer, iconRect, percentage);
 }
 
-void BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const size_t current,
-                                const size_t total) const {
+int BaseTheme::measureProgressBar(const GfxRenderer& renderer, const ProgressBarOptions options) const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  int height = metrics.progressBarHeight;
+  if (options.showPercentage) {
+    height += metrics.progressBarLabelGap + renderer.getLineHeight(UI_10_FONT_ID);
+  }
+  return height;
+}
+
+void BaseTheme::drawProgressBar(const GfxRenderer& renderer, const Rect bounds, const size_t current,
+                                const size_t total, const ProgressBarOptions options) const {
   if (total == 0) {
     return;
   }
 
-  // Use 64-bit arithmetic to avoid overflow for large files
-  const int percent = static_cast<int>((static_cast<uint64_t>(current) * 100) / total);
-
-  LOG_DBG("UI", "Drawing progress bar: current=%u, total=%u, percent=%d", current, total, percent);
-  // Draw outline
-  renderer.drawRect(rect.x, rect.y, rect.width, rect.height);
-
-  // Draw filled portion
-  const int fillWidth = (rect.width - 4) * percent / 100;
-  if (fillWidth > 0) {
-    renderer.fillRect(rect.x + 2, rect.y + 2, fillWidth, rect.height - 4);
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  if (bounds.width <= 4 || bounds.height < metrics.progressBarHeight) {
+    LOG_ERR("UI", "Invalid progress bounds: %d,%d %dx%d", bounds.x, bounds.y, bounds.width, bounds.height);
+    return;
   }
 
-  // Draw percentage text centered below bar
+  // Use 64-bit arithmetic to avoid overflow for large files
+  const int percent = static_cast<int>(std::min<uint64_t>((static_cast<uint64_t>(current) * 100) / total, 100));
+
+  LOG_DBG("UI", "Drawing progress bar: current=%u, total=%u, percent=%d", current, total, percent);
+  const Rect barRect{bounds.x, bounds.y, bounds.width, metrics.progressBarHeight};
+
+  // Draw outline
+  renderer.drawRect(barRect.x, barRect.y, barRect.width, barRect.height);
+
+  // Draw filled portion
+  const int fillWidth = (barRect.width - 4) * percent / 100;
+  if (fillWidth > 0) {
+    renderer.fillRect(barRect.x + 2, barRect.y + 2, fillWidth, barRect.height - 4);
+  }
+
+  if (!options.showPercentage) {
+    return;
+  }
+
+  const int requiredHeight = measureProgressBar(renderer, options);
+  if (bounds.height < requiredHeight) {
+    LOG_ERR("UI", "Progress bounds too short: provided=%d, required=%d", bounds.height, requiredHeight);
+    return;
+  }
+
+  // Draw the percentage inside the bounds, centered relative to the bar.
   const std::string percentText = std::to_string(percent) + "%";
-  renderer.drawCenteredText(UI_10_FONT_ID, rect.y + rect.height + 15, percentText.c_str());
+  const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, percentText.c_str());
+  const int textX = barRect.x + (barRect.width - textWidth) / 2;
+  const int textY = barRect.y + barRect.height + metrics.progressBarLabelGap;
+  renderer.drawText(UI_10_FONT_ID, textX, textY, percentText.c_str());
 }
 
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
