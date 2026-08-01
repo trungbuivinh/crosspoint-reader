@@ -22,12 +22,12 @@ def load_image(path, width, height):
         img = Image.open(io.BytesIO(png_bytes))
     else:
         img = Image.open(path)
-        img = img.convert('RGBA')
         img = img.resize((width, height), Image.LANCZOS)
-        # Flatten alpha: paste on white background
-        background = Image.new('RGBA', img.size, (255, 255, 255, 255))
-        background.paste(img, mask=img.split()[3])
-        img = background
+    # Flatten alpha: transparent SVG pixels otherwise convert to black.
+    img = img.convert('RGBA')
+    background = Image.new('RGBA', img.size, (255, 255, 255, 255))
+    background.paste(img, mask=img.split()[3])
+    img = background
     # Rotate 90 degrees counterclockwise
     img = img.rotate(90, expand=True)
     return img
@@ -52,12 +52,12 @@ def image_to_c_array(img, array_name):
     # Format as C array
     c = f'#pragma once\n#include <cstdint>\n\n'
     c += f'// size: {width}x{height}\n'
-    c += f'static const uint8_t {array_name}[] = {{\n    '
-    for i, v in enumerate(packed):
-        c += f'0x{v:02X}, '
-        if (i + 1) % 16 == 0:
-            c += '\n    '
-    c = c.rstrip(', \n') + '\n};\n'
+    c += f'static const uint8_t {array_name}[] = {{\n'
+    for offset in range(0, len(packed), 16):
+        values = ', '.join(f'0x{value:02X}' for value in packed[offset:offset + 16])
+        suffix = ',' if offset + 16 < len(packed) else ''
+        c += f'    {values}{suffix}\n'
+    c += '};\n'
     return c
 
 def main():
