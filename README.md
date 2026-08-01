@@ -6,6 +6,8 @@ CrossPoint is open-source e-reader firmware - community-built, fully hackable, f
 
 **Now running on:** ESP32C3-based Xteink [X4](https://www.xteink.com/products/xteink-x4) and [X3](https://www.xteink.com/products/xteink-x3).
 
+This personal fork currently carries two additions on top of CrossPoint: the Google Drive EPUB mirror and dual-source OTA updates. See [Personal fork features](./docs/personal-fork-features.md) for their scope and release policy.
+
 ![CrossPoint Reader running on Xteink device](./docs/images/cover.jpg)
 
 ## What can CrossPoint do?
@@ -140,6 +142,7 @@ Conversion runs the firmware repo's `lib/EpdFont/scripts/fontconvert_sdcard.py` 
 - [Web server usage](./docs/webserver.md)
 - [Web server endpoints](./docs/webserver-endpoints.md)
 - [Google Drive sync](./docs/google-drive-sync.md)
+- [Personal fork features](./docs/personal-fork-features.md)
 - [Project scope](./SCOPE.md)
 - [Contributing docs](./docs/contributing/README.md)
 

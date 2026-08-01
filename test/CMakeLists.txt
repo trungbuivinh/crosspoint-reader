@@ -40,6 +40,7 @@ include(GoogleTest)
 
 add_subdirectory(streaming_json_parser)
 add_subdirectory(release_json_parser)
+add_subdirectory(ota_version)
 add_subdirectory(drive_list_json_parser)
 add_subdirectory(google_drive_sync_plan)
 add_subdirectory(differential_rounding)
