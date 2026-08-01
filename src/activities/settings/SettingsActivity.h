@@ -1,7 +1,7 @@
 #pragma once
 #include <I18n.h>
 
-#include <functional>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -48,12 +48,13 @@ struct SettingInfo {
   size_t stringOffset = 0;
   size_t stringMaxLen = 0;
 
-  // Dynamic accessors (for settings stored outside CrossPointSettings, e.g. KOReaderCredentialStore)
-  std::function<uint8_t()> valueGetter;
-  std::function<void(uint8_t)> valueSetter;
-  std::function<std::string()> stringGetter;
-  std::function<void(const std::string&)> stringSetter;
-  std::function<bool(const std::string&, std::string&, std::string&)> stringValidator;
+  // Dynamic accessors (for settings stored outside CrossPointSettings, e.g. KOReaderCredentialStore).
+  // Keep these as function pointers: std::function adds storage to every setting and made the
+  // settings list too large to allocate reliably on memory-constrained devices.
+  uint8_t (*valueGetter)() = nullptr;
+  void (*valueSetter)(uint8_t) = nullptr;
+  std::string (*stringGetter)() = nullptr;
+  void (*stringSetter)(const std::string&) = nullptr;
 
   SettingInfo& withObfuscated() {
     obfuscated = true;
@@ -115,48 +116,48 @@ struct SettingInfo {
     return s;
   }
 
-  static SettingInfo DynamicEnum(StrId nameId, std::vector<StrId> values, std::function<uint8_t()> getter,
-                                 std::function<void(uint8_t)> setter, const char* key = nullptr,
-                                 StrId category = StrId::STR_NONE_OPT) {
+  static SettingInfo DynamicEnum(StrId nameId, std::vector<StrId> values, uint8_t (*getter)(), void (*setter)(uint8_t),
+                                 const char* key = nullptr, StrId category = StrId::STR_NONE_OPT) {
     SettingInfo s;
     s.nameId = nameId;
     s.type = SettingType::ENUM;
     s.enumValues = std::move(values);
-    s.valueGetter = std::move(getter);
-    s.valueSetter = std::move(setter);
+    s.valueGetter = getter;
+    s.valueSetter = setter;
     s.key = key;
     s.category = category;
     return s;
   }
 
-  static SettingInfo DynamicString(StrId nameId, std::function<std::string()> getter,
-                                   std::function<void(const std::string&)> setter, const char* key = nullptr,
-                                   StrId category = StrId::STR_NONE_OPT) {
+  static SettingInfo DynamicString(StrId nameId, std::string (*getter)(), void (*setter)(const std::string&),
+                                   const char* key = nullptr, StrId category = StrId::STR_NONE_OPT) {
     SettingInfo s;
     s.nameId = nameId;
     s.type = SettingType::STRING;
-    s.stringGetter = std::move(getter);
-    s.stringSetter = std::move(setter);
+    s.stringGetter = getter;
+    s.stringSetter = setter;
     s.key = key;
     s.category = category;
     return s;
   }
 
-  static SettingInfo DynamicDirectory(StrId nameId, std::function<std::string()> getter,
-                                      std::function<void(const std::string&)> setter,
-                                      std::function<bool(const std::string&, std::string&, std::string&)> validator,
+  static SettingInfo DynamicDirectory(StrId nameId, std::string (*getter)(), void (*setter)(const std::string&),
                                       const char* key = nullptr, StrId category = StrId::STR_NONE_OPT) {
     SettingInfo s;
     s.nameId = nameId;
     s.type = SettingType::DIRECTORY;
-    s.stringGetter = std::move(getter);
-    s.stringSetter = std::move(setter);
-    s.stringValidator = std::move(validator);
+    s.stringGetter = getter;
+    s.stringSetter = setter;
     s.key = key;
     s.category = category;
     return s;
   }
 };
+
+#if UINTPTR_MAX == UINT32_MAX
+static_assert(sizeof(SettingInfo) <= 80,
+              "SettingInfo grew beyond its safe ESP32 memory budget; avoid per-entry owning callables");
+#endif
 
 class SettingsActivity final : public Activity {
   ButtonNavigator buttonNavigator;
