@@ -613,20 +613,23 @@ upstream    https://github.com/crosspoint-reader/crosspoint-reader.git (fetch/pu
 
 ### Personal Fork Purpose & Release Branching Strategy
 
-**This fork (`origin` = trungbuivinh/crosspoint-reader) is for Trung Bui's own personal device use.** There is no intent to contribute features upstream via PR. Custom features are built on top of upstream's latest **stable release** (`master`), never on `develop` (upstream's active integration branch, which carries substantial unreleased/unrelated work not wanted on the device).
+**This fork (`origin` = trungbuivinh/crosspoint-reader) is for Trung Bui's own personal device use.** There is no intent to contribute features upstream via PR. Custom features are built on top of upstream's latest **stable release tag**, never on `develop` or a moving post-release branch that may carry unreleased/unrelated work not wanted on the device.
 
-**Branch naming/versioning**: `release/<upstream-version>.<patch-rev>` (e.g. `release/1.4.1.0` = upstream 1.4.1 + personal patch revision 0). Bump the patch-rev for an additional personal tweak on the same upstream base; reset to `.0` when rebasing onto a new upstream stable release. Set `platformio.ini`'s `[crosspoint] version` to match exactly.
+**Branch naming/versioning**: `release/<upstream-version>.<patch-rev>` (e.g. `release/1.4.1.0` = upstream 1.4.1 + personal patch revision 0). Bump the patch-rev for an additional personal tweak on the same upstream base; reset to `.0` when porting onto a fresh upstream stable release. Set `platformio.ini`'s `[crosspoint] version` to match exactly.
 
 **Updating to a new upstream stable release** (e.g. 1.5.0):
 ```bash
-git fetch upstream
-git checkout -b release/1.5.0.0 upstream/master   # fresh branch, no rebase-in-place
-git cherry-pick <feature-commit-hash(es)>         # replay personal commit(s) onto the new base
-# bump platformio.ini [crosspoint] version, commit
-pio run -e default && pio check -e default        # verify before pushing
-git push -u origin release/1.5.0.0
+git fetch --prune --tags upstream
+git switch -c release/1.5.0.0 1.5.0              # immutable stable tag; never rebase the old release branch
+git switch -c feature/port-personal-features-1-5-0
+# Use .claude/skills/crosspoint-upstream-release/ to port both personal features
+# onto the new upstream architecture and retain the PR #4/#6 safety invariants.
+.claude/skills/crosspoint-upstream-release/scripts/audit_fork_invariants.sh 1.5.0.0
+# Run formatting, host tests, cppcheck, default, gh_release, and X4 hardware gates.
+git push origin release/1.5.0.0
+git push -u origin feature/port-personal-features-1-5-0  # PR into release/1.5.0.0
 ```
-Cherry-pick onto a fresh branch (not rebase-in-place) is deliberate: it never force-pushes or rewrites an already-pushed branch's history — safer for a solo workflow.
+Porting onto a fresh stable-tag branch (not rebasing in place) is deliberate: it never force-pushes or rewrites an already-pushed branch's history, and it prevents unreleased upstream commits from entering production firmware. The `crosspoint-upstream-release` skill owns the complete conflict-resolution, verification, hardware, and publication workflow.
 
 **Git identity for this repo (local, not global)**: `Trung Bui <buivinhtrungqng@gmail.com>` — set via `git config --local user.name`/`user.email`; the global config elsewhere may differ. **Never add a Claude/AI co-author trailer to commits in this repo.**
 

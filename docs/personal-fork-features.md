@@ -66,6 +66,14 @@ created from that release's upstream base; this historical release branch will
 not be rebased or force-pushed. When porting, preserve the OTA download stack of
 the new upstream release rather than replacing it with the 1.4 implementation.
 
+Repository maintainers should use the project-local
+`crosspoint-upstream-release` skill for this operation. It verifies the latest
+stable upstream tag, creates a fresh four-component release base, inventories
+the personal delta, carries both feature contracts and PR #4/#6 hardening into
+the new upstream architecture, and blocks publication until automated and X4
+hardware gates are complete. Its instructions and invariant audit live under
+`.claude/skills/crosspoint-upstream-release/`.
+
 For custom OTA publication, the tag must exactly match the `[crosspoint] version`
 in `platformio.ini`. The release workflow builds `gh_release`, publishes a stable
 GitHub Release, and attaches the generated image as `firmware.bin`. Drafts and

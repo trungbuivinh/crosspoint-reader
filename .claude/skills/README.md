@@ -21,6 +21,7 @@ CLAUDE.md does not carry.
 | `hal-and-abstractions` | touching storage, input, display, settings, i18n, rendering |
 | `scope-discipline` | adding a feature, activity, lib, setting, or dependency |
 | `refactor-for-review` | refactoring, cleaning up, or preparing a change for PR |
+| `crosspoint-upstream-release` | porting this fork to a new stable upstream release while retaining both personal features and production hardening |
 
 Each skill ends with a self-review checklist Claude runs against its own diff
 before handing it back. Reviewing a PR? Those checklists double as a fast rubric.

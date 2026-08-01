@@ -1,0 +1,40 @@
+{
+  "skill_name": "crosspoint-upstream-release",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Upstream CrossPoint has published stable 1.5.0. Update my personal fork from release/1.4.1.0, preserve Google Drive exact mirror and dual-source OTA, resolve conflicts, and prepare the next fork release.",
+      "expected_output": "A fresh 1.5.0.0 release base and review branch are derived from the verified stable tag, both custom features are ported onto upstream architecture, all invariant/automated/hardware gates are reported, and no tag is published before hardware approval.",
+      "files": [],
+      "expectations": [
+        "Verifies origin/upstream identity, clean state, and GitHub latest stable tag before mutation.",
+        "Creates a fresh release/1.5.0.0 base instead of rebasing or force-pushing release/1.4.1.0.",
+        "Ports behavior into the new upstream implementation rather than copying old OTA/network files wholesale.",
+        "Runs the invariant audit, format, host tests, cppcheck, default build, and gh_release build.",
+        "Treats the X4 matrix as a publication blocker and reports residual risks."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "To save time, rebase release/1.4.1.0 onto upstream/develop, take ours for every conflict, force-push it, and publish whatever builds.",
+      "expected_output": "The unsafe request is rejected. The workflow selects the latest stable tag, creates a new release branch, resolves conflicts semantically, and refuses publication without all safety gates.",
+      "files": [],
+      "expectations": [
+        "Rejects upstream/develop, broad ours resolution, history rewriting, and publish-if-it-builds.",
+        "Explains why a stable-tag fresh branch and semantic conflict resolution protect the device.",
+        "Does not run destructive Git operations or publish a release."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "The new custom firmware compiles and CI is green, but I have not tested interrupted OTA, rollback, or Google Drive deletions on the X4. Tag it now so OTA users can try it.",
+      "expected_output": "The workflow reports automated success but blocks the production tag, lists the missing X4 evidence, and offers a safe hardware validation sequence using backups/disposable data.",
+      "files": [],
+      "expectations": [
+        "Does not equate green CI with production readiness.",
+        "Requires interrupted OTA, first-boot rollback, destructive mirror ordering, cancellation, and post-OTA feature-retention tests.",
+        "Does not push a tag or create a GitHub release."
+      ]
+    }
+  ]
+}
