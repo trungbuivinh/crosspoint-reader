@@ -131,6 +131,12 @@ transfer, while the Cancel button continues to be polled for chunked responses.
 | Sync incomplete | A download, checksum, filesystem operation, or user cancellation prevented an exact result. Deletions were withheld if transfer failed. |
 | Local file disappeared | The selected target is managed by Drive; local extras are intentionally deleted after confirmation. |
 
+The personal diagnostic build adds the HTTP stage, HTTP status, and transport
+error to the Drive-tree error screen. Its serial log also records the first 191
+bytes of a non-200 server response, which lets the owner distinguish a bad API
+key, sharing restriction, quota problem, or TLS/network failure without
+approving a mirror plan.
+
 ## Related documentation
 
 - [User Guide](../USER_GUIDE.md)

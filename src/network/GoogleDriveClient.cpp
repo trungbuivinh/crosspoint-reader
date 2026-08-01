@@ -83,9 +83,11 @@ bool isGoogleNative(const ParsedChild& child) { return child.mimeType.rfind(GOOG
 
 namespace GoogleDriveClient {
 
-DriveTreeResult listTree(const std::string& folderId, const std::string& apiKey, DriveTree& out) {
+DriveTreeResult listTree(const std::string& folderId, const std::string& apiKey, DriveTree& out,
+                         HttpRequestDiagnostics::FailureDetails* failureDetails) {
   out.nodes.clear();
   out.nodes.reserve(64);
+  if (failureDetails) *failureDetails = {};
 
   std::deque<PendingFolder> pending;
   pending.push_back({folderId, "", 0});
@@ -123,12 +125,20 @@ DriveTreeResult listTree(const std::string& folderId, const std::string& apiKey,
 
       collector.children.clear();
       parser->reset();
-      const bool ok = HttpDownloader::fetchUrl(url, [&parser](const uint8_t* data, size_t len) {
-        parser->feed(reinterpret_cast<const char*>(data), len);
-        return true;
-      });
+      const bool ok = HttpDownloader::fetchUrl(
+          url,
+          [&parser](const uint8_t* data, size_t len) {
+            parser->feed(reinterpret_cast<const char*>(data), len);
+            return true;
+          },
+          "", "", failureDetails);
       if (!ok) {
-        LOG_ERR("GDRV", "Tree listing HTTP failure at %s page %d", folder.relativePath.c_str(), page);
+        const auto stage = failureDetails ? HttpRequestDiagnostics::failureStageName(failureDetails->stage) : "unknown";
+        const int status = failureDetails ? failureDetails->httpStatus : 0;
+        const int transportError = failureDetails ? failureDetails->transportError : 0;
+        const size_t receivedBytes = failureDetails ? failureDetails->receivedBytes : 0;
+        LOG_ERR("GDRV", "Tree listing failure at %s page %d: stage=%s http=%d err=%d bytes=%zu",
+                folder.relativePath.c_str(), page, stage, status, transportError, receivedBytes);
         return DriveTreeResult::HTTP_ERROR;
       }
       if (!parser->finish()) {

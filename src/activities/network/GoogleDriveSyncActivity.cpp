@@ -82,6 +82,7 @@ void GoogleDriveSyncActivity::onEnter() {
     fileTotal = 0;
     cancelRequested = false;
     errorMessage.clear();
+    driveTreeFailure = {};
     lastRenderedFilePercent = -1;
     lastRenderedProgressBytes = 0;
   }
@@ -145,10 +146,17 @@ void GoogleDriveSyncActivity::onWifiSelectionComplete(const bool connected) {
   }
 }
 
-std::string GoogleDriveSyncActivity::driveErrorMessage(const GoogleDriveClient::DriveTreeResult result) {
+std::string GoogleDriveSyncActivity::driveErrorMessage(const GoogleDriveClient::DriveTreeResult result,
+                                                       const HttpRequestDiagnostics::FailureDetails& failureDetails) {
   switch (result) {
-    case GoogleDriveClient::DriveTreeResult::HTTP_ERROR:
-      return tr(STR_GDRIVE_ERR_FETCH_TREE);
+    case GoogleDriveClient::DriveTreeResult::HTTP_ERROR: {
+      char message[128];
+      snprintf(message, sizeof(message), "%s [%s, HTTP %d, err %d]", tr(STR_GDRIVE_ERR_FETCH_TREE),
+               HttpRequestDiagnostics::failureStageName(failureDetails.stage), failureDetails.httpStatus,
+               failureDetails.transportError);
+      // Terminal error path only: the activity keeps this owning message for the retry screen.
+      return message;
+    }
     case GoogleDriveClient::DriveTreeResult::OOM:
       return tr(STR_GDRIVE_ERR_MEMORY);
     case GoogleDriveClient::DriveTreeResult::PARSE_ERROR:
@@ -178,12 +186,13 @@ void GoogleDriveSyncActivity::startListing() {
   }
   requestUpdate(true);
 
-  const auto result = GoogleDriveClient::listTree(GDRIVE_STORE.getFolderId(), GDRIVE_STORE.getApiKey(), remoteTree);
+  const auto result =
+      GoogleDriveClient::listTree(GDRIVE_STORE.getFolderId(), GDRIVE_STORE.getApiKey(), remoteTree, &driveTreeFailure);
   if (result != GoogleDriveClient::DriveTreeResult::OK) {
     {
       RenderLock lock(*this);
       state = SyncState::ERROR;
-      errorMessage = driveErrorMessage(result);
+      errorMessage = driveErrorMessage(result, driveTreeFailure);
     }
     requestUpdate();
     return;
