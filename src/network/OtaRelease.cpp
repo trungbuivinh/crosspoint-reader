@@ -8,8 +8,7 @@ constexpr char OFFICIAL_LATEST_RELEASE_URL[] =
     "https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/latest";
 constexpr char CUSTOM_LATEST_RELEASE_URL[] =
     "https://api.github.com/repos/trungbuivinh/crosspoint-reader/releases/latest";
-constexpr char OFFICIAL_ASSET_PREFIX[] =
-    "https://github.com/crosspoint-reader/crosspoint-reader/releases/download/";
+constexpr char OFFICIAL_ASSET_PREFIX[] = "https://github.com/crosspoint-reader/crosspoint-reader/releases/download/";
 constexpr char CUSTOM_ASSET_PREFIX[] = "https://github.com/trungbuivinh/crosspoint-reader/releases/download/";
 
 }  // namespace
