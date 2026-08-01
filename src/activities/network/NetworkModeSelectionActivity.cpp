@@ -73,7 +73,7 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
   static constexpr StrId menuDescs[MENU_ITEM_COUNT] = {StrId::STR_JOIN_DESC, StrId::STR_CALIBRE_DESC,
                                                        StrId::STR_HOTSPOT_DESC, StrId::STR_GDRIVE_DESC};
   static constexpr UIIcon menuIcons[MENU_ITEM_COUNT] = {UIIcon::Wifi, UIIcon::Library, UIIcon::Hotspot,
-                                                        UIIcon::Transfer};
+                                                        UIIcon::GoogleDrive};
 
   GUI.drawList(
       renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(MENU_ITEM_COUNT), selectedIndex,
