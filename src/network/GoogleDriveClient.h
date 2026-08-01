@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "network/HttpRequestDiagnostics.h"
+
 enum class DriveNodeType : uint8_t { DIRECTORY, EPUB };
 
 struct DriveNode {
@@ -49,7 +51,8 @@ enum class DriveTreeResult {
  * retained; other file types are ignored. The configured Drive folder maps to
  * the local sync root, so returned paths are relative to that root.
  */
-DriveTreeResult listTree(const std::string& folderId, const std::string& apiKey, DriveTree& out);
+DriveTreeResult listTree(const std::string& folderId, const std::string& apiKey, DriveTree& out,
+                         HttpRequestDiagnostics::FailureDetails* failureDetails = nullptr);
 
 /** Direct-download URL for a file (alt=media). */
 std::string downloadUrl(const std::string& fileId, const std::string& apiKey);

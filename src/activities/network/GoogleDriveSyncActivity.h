@@ -9,6 +9,7 @@
 #include "activities/Activity.h"
 #include "network/GoogleDriveClient.h"
 #include "network/GoogleDriveSyncPlan.h"
+#include "network/HttpRequestDiagnostics.h"
 
 /** Pulls a shared Google Drive EPUB tree into a dedicated SD-card mirror root. */
 class GoogleDriveSyncActivity final : public Activity {
@@ -70,6 +71,8 @@ class GoogleDriveSyncActivity final : public Activity {
   size_t fileTotal = 0;
   bool cancelRequested = false;
   std::string errorMessage;
+  // Caller-owned HTTP failure data keeps diagnostic capture off the loop stack.
+  HttpRequestDiagnostics::FailureDetails driveTreeFailure;
   // SdFat long names can occupy 255 UTF-8 bytes. Keep this reusable buffer in
   // the heap-allocated activity rather than in recursive scan stack frames.
   std::array<char, 512> fileNameBuffer{};
@@ -105,7 +108,8 @@ class GoogleDriveSyncActivity final : public Activity {
 
   std::string absolutePath(const std::string& relativePath) const;
   bool removePathRecursively(const std::string& path, bool clearMetadata);
-  static std::string driveErrorMessage(GoogleDriveClient::DriveTreeResult result);
+  static std::string driveErrorMessage(GoogleDriveClient::DriveTreeResult result,
+                                       const HttpRequestDiagnostics::FailureDetails& failureDetails);
 
   bool preventAutoSleep() override { return true; }
 };
