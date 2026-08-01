@@ -39,8 +39,17 @@ void SettingsActivity::rebuildSettingsLists() {
   // reader activity ran — otherwise the font-family picker shows stale list.
   sdFontSystem.refreshIfDirty();
 
-  for (auto& setting : getSettingsList(&sdFontSystem.registry())) {
+  displaySettings.reserve(8);
+  readerSettings.reserve(14);
+  controlsSettings.reserve(8);
+  systemSettings.reserve(12);
+
+  for (const auto& setting : getSettingsList()) {
     if (setting.category == StrId::STR_NONE_OPT) continue;
+    if (setting.nameId == StrId::STR_FONT_FAMILY && sdFontSystem.registry().getFamilyCount() > 0) {
+      readerSettings.push_back(buildFontFamilySetting(&sdFontSystem.registry()));
+      continue;
+    }
     if (setting.category == StrId::STR_CAT_DISPLAY) {
       displaySettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_READER) {

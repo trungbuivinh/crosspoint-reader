@@ -26,6 +26,7 @@
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
+#include "SettingsList.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
@@ -346,6 +347,9 @@ void setup() {
   HalSystem::checkPanic();
 
   SETTINGS.loadFromFile();
+  // Materialize the compact shared settings list while the heap is still unfragmented.
+  // Web and device settings views only borrow this list; they must never allocate a full copy.
+  (void)getSettingsList();
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));

@@ -13,7 +13,35 @@
 #include "CrossPointSettings.h"
 #include "GoogleDriveStore.h"
 #include "KOReaderCredentialStore.h"
+#include "SdCardFontSystem.h"
 #include "activities/settings/SettingsActivity.h"
+
+inline uint8_t getFontFamilySettingValue() {
+  const auto& families = sdFontSystem.registry().getFamilies();
+  if (SETTINGS.sdFontFamilyName[0] != '\0') {
+    for (size_t i = 0; i < families.size(); i++) {
+      if (families[i].name == SETTINGS.sdFontFamilyName) {
+        return static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i);
+      }
+    }
+  }
+  return SETTINGS.fontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? SETTINGS.fontFamily : 0;
+}
+
+inline void setFontFamilySettingValue(uint8_t value) {
+  if (value < CrossPointSettings::BUILTIN_FONT_COUNT) {
+    SETTINGS.fontFamily = value;
+    SETTINGS.sdFontFamilyName[0] = '\0';
+    return;
+  }
+
+  const auto& families = sdFontSystem.registry().getFamilies();
+  const size_t sdIndex = value - CrossPointSettings::BUILTIN_FONT_COUNT;
+  if (sdIndex < families.size()) {
+    strncpy(SETTINGS.sdFontFamilyName, families[sdIndex].name.c_str(), sizeof(SETTINGS.sdFontFamilyName) - 1);
+    SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
+  }
+}
 
 // Build the font family setting dynamically. When registry is non-null, SD card fonts
 // are appended after the built-in fonts. Otherwise only built-in fonts are listed.
@@ -31,7 +59,6 @@ inline SettingInfo buildFontFamilySetting(const SdCardFontRegistry* registry) {
                    [](const SdCardFontFamilyInfo& f) { return f.name; });
   }
 
-  // Capture the SD font count for the lambdas
   const int sdFontCount = static_cast<int>(enumStringValues.size());
 
   // Total option count = built-in + SD card families
@@ -53,40 +80,8 @@ inline SettingInfo buildFontFamilySetting(const SdCardFontRegistry* registry) {
   s.key = "fontFamily";
   s.category = StrId::STR_CAT_READER;
 
-  // Capture registry families by copy for the lambdas
-  std::vector<std::string> sdFamilyNames;
-  if (registry) {
-    const auto& families = registry->getFamilies();
-    sdFamilyNames.reserve(families.size());
-    std::transform(families.begin(), families.end(), std::back_inserter(sdFamilyNames),
-                   [](const SdCardFontFamilyInfo& f) { return f.name; });
-  }
-
-  s.valueGetter = [sdFamilyNames]() -> uint8_t {
-    // If an SD card font is selected, find its index
-    if (SETTINGS.sdFontFamilyName[0] != '\0') {
-      for (int i = 0; i < static_cast<int>(sdFamilyNames.size()); i++) {
-        if (sdFamilyNames[i] == SETTINGS.sdFontFamilyName) {
-          return static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + i);
-        }
-      }
-      // SD font name not found in registry — fall through to built-in
-    }
-    return SETTINGS.fontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? SETTINGS.fontFamily : 0;
-  };
-
-  s.valueSetter = [sdFamilyNames](uint8_t v) {
-    if (v < CrossPointSettings::BUILTIN_FONT_COUNT) {
-      SETTINGS.fontFamily = v;
-      SETTINGS.sdFontFamilyName[0] = '\0';
-    } else {
-      int sdIdx = v - CrossPointSettings::BUILTIN_FONT_COUNT;
-      if (sdIdx < static_cast<int>(sdFamilyNames.size())) {
-        strncpy(SETTINGS.sdFontFamilyName, sdFamilyNames[sdIdx].c_str(), sizeof(SETTINGS.sdFontFamilyName) - 1);
-        SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
-      }
-    }
-  };
+  s.valueGetter = &getFontFamilySettingValue;
+  s.valueSetter = &setFontFamilySettingValue;
 
   return s;
 }
@@ -109,20 +104,16 @@ inline void gdriveSetLocalFolder(const std::string& v) {
   GDRIVE_STORE.setLocalFolder(v);
   GDRIVE_STORE.saveToFile();
 }
-inline bool gdriveValidateLocalFolder(const std::string& input, std::string& normalized, std::string& error) {
-  return GoogleDriveStore::validateLocalFolder(input, normalized, error);
-}
 
 // Shared settings list used by both the device settings UI and the web settings API.
 // Each entry has a key (for JSON API) and category (for grouping).
 // ACTION-type entries and entries without a key are device-only.
 //
 // The static list is constructed exactly once (master's optimization, #1086 +
-// #1636) so the per-entry SettingInfo cost is paid once. When an
-// SdCardFontRegistry is supplied AND has SD card fonts installed, the
-// font-family entry is replaced in a per-call copy with a registry-aware
-// version. Callers without SD fonts pay only a vector copy.
-inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* registry = nullptr) {
+// #1636) so the per-entry SettingInfo cost is paid once. Return it by const
+// reference: copying the whole list needs a large contiguous heap block and
+// can abort when WiFi has fragmented the heap.
+inline const std::vector<SettingInfo>& getSettingsList() {
   static const std::vector<SettingInfo> baseList = [] {
     std::vector<SettingInfo> v = {
         // --- Display ---
@@ -253,7 +244,7 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
         SettingInfo::DynamicString(StrId::STR_GDRIVE_API_KEY, &gdriveGetApiKey, &gdriveSetApiKey, "gdriveApiKey",
                                    StrId::STR_GDRIVE_SYNC),
         SettingInfo::DynamicDirectory(StrId::STR_GDRIVE_LOCAL_FOLDER, &gdriveGetLocalFolder, &gdriveSetLocalFolder,
-                                      &gdriveValidateLocalFolder, "gdriveLocalFolder", StrId::STR_GDRIVE_SYNC),
+                                      "gdriveLocalFolder", StrId::STR_GDRIVE_SYNC),
         // --- Status Bar Settings (web-only, uses StatusBarSettingsActivity) ---
         SettingInfo::Toggle(StrId::STR_CHAPTER_PAGE_COUNT, &CrossPointSettings::statusBarChapterPageCount,
                             "statusBarChapterPageCount", StrId::STR_CUSTOMISE_STATUS_BAR),
@@ -303,12 +294,5 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
     return v;
   }();
 
-  std::vector<SettingInfo> v = baseList;
-  if (registry && registry->getFamilyCount() > 0) {
-    auto it = std::find_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_FONT_FAMILY; });
-    if (it != v.end()) {
-      *it = buildFontFamilySetting(registry);
-    }
-  }
-  return v;
+  return baseList;
 }

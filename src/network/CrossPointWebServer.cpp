@@ -9,6 +9,7 @@
 #include <esp_task_wdt.h>
 
 #include <algorithm>
+#include <cstring>
 #include <unordered_map>
 
 #include "CrossPointSettings.h"
@@ -1104,10 +1105,9 @@ void CrossPointWebServer::handleSettingsPage() const {
 }
 
 void CrossPointWebServer::handleGetSettings() const {
-  // Pass the SD font registry so the fontFamily setting's enumStringValues
-  // includes SD-resident families — otherwise the web API only exposes the
-  // three built-in fonts.
-  const auto& settings = getSettingsList(&sdFontSystem.registry());
+  // Never copy the full settings list here. WiFi fragments the heap, and the
+  // previous multi-kilobyte contiguous allocation could abort the device.
+  const auto& settings = getSettingsList();
 
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   server->send(200, "application/json", "");
@@ -1136,13 +1136,22 @@ void CrossPointWebServer::handleGetSettings() const {
       }
       case SettingType::ENUM: {
         doc["type"] = "enum";
-        if (s.valuePtr) {
+        const bool isFontFamily = s.nameId == StrId::STR_FONT_FAMILY;
+        if (isFontFamily) {
+          doc["value"] = static_cast<int>(getFontFamilySettingValue());
+        } else if (s.valuePtr) {
           doc["value"] = static_cast<int>(SETTINGS.*(s.valuePtr));
         } else if (s.valueGetter) {
           doc["value"] = static_cast<int>(s.valueGetter());
         }
         JsonArray options = doc["options"].to<JsonArray>();
-        if (!s.enumStringValues.empty()) {
+        if (isFontFamily && sdFontSystem.registry().getFamilyCount() > 0) {
+          options.add(I18N.get(StrId::STR_NOTO_SERIF));
+          options.add(I18N.get(StrId::STR_NOTO_SANS));
+          for (const auto& family : sdFontSystem.registry().getFamilies()) {
+            options.add(family.name);
+          }
+        } else if (!s.enumStringValues.empty()) {
           for (const auto& opt : s.enumStringValues) {
             options.add(opt);
           }
@@ -1216,7 +1225,7 @@ void CrossPointWebServer::handlePostSettings() {
     return;
   }
 
-  const auto& settings = getSettingsList(&sdFontSystem.registry());
+  const auto& settings = getSettingsList();
   std::unordered_map<std::string, std::string> normalizedDirectories;
   for (const auto& s : settings) {
     if (!s.key || s.type != SettingType::DIRECTORY || !doc[s.key].is<JsonVariant>()) continue;
@@ -1227,7 +1236,9 @@ void CrossPointWebServer::handlePostSettings() {
     const std::string input = doc[s.key].as<std::string>();
     std::string normalized = input;
     std::string validationError;
-    if (s.stringValidator && !s.stringValidator(input, normalized, validationError)) {
+    if (strcmp(s.key, "gdriveLocalFolder") != 0 ||
+        !GoogleDriveStore::validateLocalFolder(input, normalized, validationError)) {
+      if (validationError.empty()) validationError = "Unsupported directory setting";
       server->send(400, "text/plain", validationError.c_str());
       return;
     }
@@ -1250,10 +1261,15 @@ void CrossPointWebServer::handlePostSettings() {
       }
       case SettingType::ENUM: {
         const int val = doc[s.key].as<int>();
-        const int maxVal = s.enumStringValues.empty() ? static_cast<int>(s.enumValues.size())
-                                                      : static_cast<int>(s.enumStringValues.size());
+        const bool isFontFamily = s.nameId == StrId::STR_FONT_FAMILY;
+        const int maxVal = isFontFamily
+                               ? CrossPointSettings::BUILTIN_FONT_COUNT + sdFontSystem.registry().getFamilyCount()
+                               : (s.enumStringValues.empty() ? static_cast<int>(s.enumValues.size())
+                                                             : static_cast<int>(s.enumStringValues.size()));
         if (val >= 0 && val < maxVal) {
-          if (s.valuePtr) {
+          if (isFontFamily) {
+            setFontFamilySettingValue(static_cast<uint8_t>(val));
+          } else if (s.valuePtr) {
             SETTINGS.*(s.valuePtr) = static_cast<uint8_t>(val);
           } else if (s.valueSetter) {
             s.valueSetter(static_cast<uint8_t>(val));
