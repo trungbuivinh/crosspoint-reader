@@ -6,6 +6,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <MD5Builder.h>
+#include <Memory.h>
 #include <WiFi.h>
 #include <esp_task_wdt.h>
 
@@ -13,6 +14,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <string_view>
 #include <utility>
 
 #include "GoogleDriveStore.h"
@@ -28,21 +30,30 @@
 
 namespace {
 
-constexpr size_t FILE_NAME_BUFFER_SIZE = 500;
+constexpr size_t MD5_BUFFER_SIZE = 1024;
+constexpr size_t UNKNOWN_TOTAL_RENDER_STEP = 256 * 1024;
+constexpr int PROGRESS_RENDER_PERCENT_STEP = 5;
 constexpr char PART_SUFFIX[] = ".gdrive.part";
 constexpr char BACKUP_SUFFIX[] = ".gdrive.bak";
 constexpr char CASE_SUFFIX[] = ".gdrive.case";
 
-std::string caseFoldAscii(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  return value;
+bool equalsCaseInsensitiveAscii(const std::string& lhs, const std::string& rhs) {
+  if (lhs.size() != rhs.size()) return false;
+  return std::equal(lhs.begin(), lhs.end(), rhs.begin(),
+                    [](const unsigned char a, const unsigned char b) { return std::tolower(a) == std::tolower(b); });
 }
 
-bool endsWithCaseInsensitive(const std::string& value, const char* suffix) {
-  const size_t suffixLength = strlen(suffix);
+bool endsWithCaseInsensitive(const std::string_view value, const std::string_view suffix) {
+  const size_t suffixLength = suffix.size();
   if (value.size() < suffixLength) return false;
-  return caseFoldAscii(value.substr(value.size() - suffixLength)) == caseFoldAscii(suffix);
+  const size_t offset = value.size() - suffixLength;
+  for (size_t i = 0; i < suffixLength; ++i) {
+    if (std::tolower(static_cast<unsigned char>(value[offset + i])) !=
+        std::tolower(static_cast<unsigned char>(suffix[i]))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace
@@ -50,26 +61,36 @@ bool endsWithCaseInsensitive(const std::string& value, const char* suffix) {
 void GoogleDriveSyncActivity::onEnter() {
   Activity::onEnter();
 
-  state = SyncState::CHECK_WIFI;
-  phase = SyncPhase::RENAME_PATHS;
-  remoteTree.nodes.clear();
-  localTree.clear();
-  plan = {};
-  conflictBackups.clear();
-  phaseIndex = 0;
-  completedActions = 0;
-  downloadedCount = 0;
-  deletedFileCount = 0;
-  deletedDirectoryCount = 0;
-  failedCount = 0;
-  currentName.clear();
-  fileProgress = 0;
-  fileTotal = 0;
-  cancelRequested = false;
-  errorMessage.clear();
+  {
+    RenderLock lock(*this);
+    state = SyncState::CHECK_WIFI;
+    phase = SyncPhase::RENAME_PATHS;
+    remoteTree.nodes.clear();
+    remoteTree.nodes.reserve(GoogleDriveClient::MAX_TREE_ENTRIES);
+    localTree.clear();
+    localTree.reserve(GoogleDriveClient::MAX_TREE_ENTRIES);
+    plan = {};
+    conflictBackups.clear();
+    phaseIndex = 0;
+    completedActions = 0;
+    downloadedCount = 0;
+    deletedFileCount = 0;
+    deletedDirectoryCount = 0;
+    failedCount = 0;
+    currentName.clear();
+    fileProgress = 0;
+    fileTotal = 0;
+    cancelRequested = false;
+    errorMessage.clear();
+    lastRenderedFilePercent = -1;
+    lastRenderedProgressBytes = 0;
+  }
 
   if (!GDRIVE_STORE.isConfigured()) {
-    state = SyncState::NOT_CONFIGURED;
+    {
+      RenderLock lock(*this);
+      state = SyncState::NOT_CONFIGURED;
+    }
     requestUpdate();
     return;
   }
@@ -84,6 +105,7 @@ void GoogleDriveSyncActivity::onExit() {
   localTree.clear();
   plan = {};
   conflictBackups.clear();
+  md5Buffer.reset();
 
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
@@ -101,7 +123,10 @@ void GoogleDriveSyncActivity::checkAndConnectWifi() {
 }
 
 void GoogleDriveSyncActivity::launchWifiSelection() {
-  state = SyncState::WIFI_SELECTION;
+  {
+    RenderLock lock(*this);
+    state = SyncState::WIFI_SELECTION;
+  }
   requestUpdate();
   startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
                          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
@@ -111,8 +136,11 @@ void GoogleDriveSyncActivity::onWifiSelectionComplete(const bool connected) {
   if (connected) {
     startListing();
   } else {
-    state = SyncState::ERROR;
-    errorMessage = tr(STR_WIFI_CONN_FAILED);
+    {
+      RenderLock lock(*this);
+      state = SyncState::ERROR;
+      errorMessage = tr(STR_WIFI_CONN_FAILED);
+    }
     requestUpdate();
   }
 }
@@ -120,49 +148,66 @@ void GoogleDriveSyncActivity::onWifiSelectionComplete(const bool connected) {
 std::string GoogleDriveSyncActivity::driveErrorMessage(const GoogleDriveClient::DriveTreeResult result) {
   switch (result) {
     case GoogleDriveClient::DriveTreeResult::HTTP_ERROR:
-      return "Failed to fetch the Drive tree";
+      return tr(STR_GDRIVE_ERR_FETCH_TREE);
+    case GoogleDriveClient::DriveTreeResult::OOM:
+      return tr(STR_GDRIVE_ERR_MEMORY);
     case GoogleDriveClient::DriveTreeResult::PARSE_ERROR:
-      return "Invalid response while listing Drive";
+      return tr(STR_GDRIVE_ERR_PARSE_TREE);
     case GoogleDriveClient::DriveTreeResult::TOO_MANY_ENTRIES:
-      return "Drive tree exceeds the 300-entry limit";
+      return tr(STR_GDRIVE_ERR_TOO_MANY);
     case GoogleDriveClient::DriveTreeResult::TOO_DEEP:
-      return "Drive tree exceeds the 16-level limit";
+      return tr(STR_GDRIVE_ERR_TOO_DEEP);
     case GoogleDriveClient::DriveTreeResult::PATH_TOO_LONG:
-      return "A Drive path is too long";
+      return tr(STR_GDRIVE_ERR_PATH_TOO_LONG);
     case GoogleDriveClient::DriveTreeResult::INVALID_NAME:
-      return "A Drive name cannot be represented on the SD card";
+      return tr(STR_GDRIVE_ERR_INVALID_NAME);
     case GoogleDriveClient::DriveTreeResult::NAME_COLLISION:
-      return "Drive contains colliding names in one folder";
+      return tr(STR_GDRIVE_ERR_NAME_COLLISION);
     case GoogleDriveClient::DriveTreeResult::CYCLE_DETECTED:
-      return "Drive folder cycle detected";
+      return tr(STR_GDRIVE_ERR_CYCLE);
     case GoogleDriveClient::DriveTreeResult::OK:
       break;
   }
-  return "Failed to list Drive folder";
+  return tr(STR_GDRIVE_ERR_LIST_TREE);
 }
 
 void GoogleDriveSyncActivity::startListing() {
-  state = SyncState::LISTING;
+  {
+    RenderLock lock(*this);
+    state = SyncState::LISTING;
+  }
   requestUpdate(true);
 
   const auto result = GoogleDriveClient::listTree(GDRIVE_STORE.getFolderId(), GDRIVE_STORE.getApiKey(), remoteTree);
   if (result != GoogleDriveClient::DriveTreeResult::OK) {
-    state = SyncState::ERROR;
-    errorMessage = driveErrorMessage(result);
+    {
+      RenderLock lock(*this);
+      state = SyncState::ERROR;
+      errorMessage = driveErrorMessage(result);
+    }
     requestUpdate();
     return;
   }
 
-  state = SyncState::ANALYZING;
+  {
+    RenderLock lock(*this);
+    state = SyncState::ANALYZING;
+  }
   requestUpdate(true);
   if (!buildPlan()) {
-    state = SyncState::ERROR;
-    if (errorMessage.empty()) errorMessage = "Failed to analyze the local mirror";
+    {
+      RenderLock lock(*this);
+      state = SyncState::ERROR;
+      if (errorMessage.empty()) errorMessage = tr(STR_GDRIVE_ERR_ANALYZE);
+    }
     requestUpdate();
     return;
   }
 
-  state = SyncState::READY;
+  {
+    RenderLock lock(*this);
+    state = SyncState::READY;
+  }
   requestUpdate();
 }
 
@@ -171,7 +216,15 @@ std::string GoogleDriveSyncActivity::absolutePath(const std::string& relativePat
   return GDRIVE_STORE.getLocalFolder() + "/" + relativePath;
 }
 
-bool GoogleDriveSyncActivity::calculateFileMd5(const std::string& path, std::string& out) const {
+bool GoogleDriveSyncActivity::ensureMd5Buffer() {
+  if (md5Buffer) return true;
+  md5Buffer = makeUniqueNoThrow<uint8_t[]>(MD5_BUFFER_SIZE);
+  if (!md5Buffer) LOG_ERR("GDRV", "OOM allocating MD5 scratch buffer");
+  return md5Buffer != nullptr;
+}
+
+bool GoogleDriveSyncActivity::calculateFileMd5(const std::string& path, std::string& out) {
+  if (!ensureMd5Buffer()) return false;
   HalFile file;
   if (!Storage.openFileForRead("GDRV", path, file)) {
     return false;
@@ -179,14 +232,13 @@ bool GoogleDriveSyncActivity::calculateFileMd5(const std::string& path, std::str
 
   MD5Builder md5;
   md5.begin();
-  uint8_t buffer[4096];
   while (file.available() > 0) {
-    const int read = file.read(buffer, sizeof(buffer));
+    const int read = file.read(md5Buffer.get(), MD5_BUFFER_SIZE);
     if (read <= 0) {
       file.close();
       return false;
     }
-    md5.add(buffer, static_cast<size_t>(read));
+    md5.add(md5Buffer.get(), static_cast<size_t>(read));
     yield();
     esp_task_wdt_reset();
   }
@@ -194,6 +246,23 @@ bool GoogleDriveSyncActivity::calculateFileMd5(const std::string& path, std::str
   md5.calculate();
   out = md5.toString().c_str();
   return true;
+}
+
+void GoogleDriveSyncActivity::setActionView(const std::string& name, const size_t total) {
+  {
+    RenderLock lock(*this);
+    currentName = name;
+    fileProgress = 0;
+    fileTotal = total;
+    lastRenderedFilePercent = -1;
+    lastRenderedProgressBytes = 0;
+  }
+  requestUpdate(true);
+}
+
+void GoogleDriveSyncActivity::markActionCompleted() {
+  RenderLock lock(*this);
+  completedActions++;
 }
 
 bool GoogleDriveSyncActivity::removePathRecursively(const std::string& path, const bool clearMetadata) {
@@ -211,7 +280,6 @@ bool GoogleDriveSyncActivity::removePathRecursively(const std::string& path, con
 
   std::vector<std::pair<std::string, bool>> stack;
   stack.push_back({path, false});
-  char name[FILE_NAME_BUFFER_SIZE];
   while (!stack.empty()) {
     auto [current, postOrder] = std::move(stack.back());
     stack.pop_back();
@@ -228,11 +296,11 @@ bool GoogleDriveSyncActivity::removePathRecursively(const std::string& path, con
     stack.push_back({current, true});
     dir.rewindDirectory();
     for (HalFile entry = dir.openNextFile(); entry; entry = dir.openNextFile()) {
-      entry.getName(name, sizeof(name));
-      if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
+      entry.getName(fileNameBuffer.data(), fileNameBuffer.size());
+      if (strcmp(fileNameBuffer.data(), ".") == 0 || strcmp(fileNameBuffer.data(), "..") == 0) continue;
       const bool isDirectory = entry.isDirectory();
       entry.close();
-      const std::string child = current + "/" + name;
+      const std::string child = current + "/" + fileNameBuffer.data();
       if (isDirectory) {
         stack.push_back({child, false});
       } else {
@@ -257,7 +325,6 @@ bool GoogleDriveSyncActivity::recoverArtifacts() {
   };
   std::vector<RecoverableArtifact> artifacts;
   std::vector<std::string> directories{GDRIVE_STORE.getLocalFolder()};
-  char name[FILE_NAME_BUFFER_SIZE];
 
   while (!directories.empty()) {
     const std::string current = std::move(directories.back());
@@ -265,19 +332,19 @@ bool GoogleDriveSyncActivity::recoverArtifacts() {
     HalFile dir = Storage.open(current.c_str());
     if (!dir || !dir.isDirectory()) {
       if (dir) dir.close();
-      errorMessage = "Failed to scan sync artifacts";
+      errorMessage = tr(STR_GDRIVE_ERR_SCAN_ARTIFACTS);
       return false;
     }
     dir.rewindDirectory();
     for (HalFile entry = dir.openNextFile(); entry; entry = dir.openNextFile()) {
-      entry.getName(name, sizeof(name));
-      if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
-      const std::string child = current + "/" + name;
+      entry.getName(fileNameBuffer.data(), fileNameBuffer.size());
+      if (strcmp(fileNameBuffer.data(), ".") == 0 || strcmp(fileNameBuffer.data(), "..") == 0) continue;
+      const std::string child = current + "/" + fileNameBuffer.data();
       const bool isDirectory = entry.isDirectory();
       entry.close();
-      if (endsWithCaseInsensitive(name, BACKUP_SUFFIX)) {
+      if (endsWithCaseInsensitive(fileNameBuffer.data(), BACKUP_SUFFIX)) {
         artifacts.push_back({child, strlen(BACKUP_SUFFIX)});
-      } else if (endsWithCaseInsensitive(name, CASE_SUFFIX)) {
+      } else if (endsWithCaseInsensitive(fileNameBuffer.data(), CASE_SUFFIX)) {
         artifacts.push_back({child, strlen(CASE_SUFFIX)});
       } else if (isDirectory) {
         directories.push_back(child);
@@ -291,7 +358,7 @@ bool GoogleDriveSyncActivity::recoverArtifacts() {
     // If the final path exists, leave the stale artifact in the local snapshot so
     // it is shown in the destructive plan and removed only after confirmation.
     if (!Storage.exists(finalPath.c_str()) && !Storage.rename(artifact.path.c_str(), finalPath.c_str())) {
-      errorMessage = "Failed to restore a sync backup";
+      errorMessage = tr(STR_GDRIVE_ERR_RESTORE_BACKUP);
       return false;
     }
   }
@@ -301,7 +368,6 @@ bool GoogleDriveSyncActivity::recoverArtifacts() {
 bool GoogleDriveSyncActivity::scanLocalTree() {
   localTree.clear();
   std::vector<std::pair<std::string, std::string>> directories{{GDRIVE_STORE.getLocalFolder(), ""}};
-  char name[FILE_NAME_BUFFER_SIZE];
 
   while (!directories.empty()) {
     auto [absoluteDirectory, relativeDirectory] = std::move(directories.back());
@@ -309,25 +375,26 @@ bool GoogleDriveSyncActivity::scanLocalTree() {
     HalFile dir = Storage.open(absoluteDirectory.c_str());
     if (!dir || !dir.isDirectory()) {
       if (dir) dir.close();
-      errorMessage = "Failed to scan the local mirror";
+      errorMessage = tr(STR_GDRIVE_ERR_SCAN_LOCAL);
       return false;
     }
     dir.rewindDirectory();
     for (HalFile entry = dir.openNextFile(); entry; entry = dir.openNextFile()) {
-      entry.getName(name, sizeof(name));
-      if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
-      const std::string relativePath = relativeDirectory.empty() ? name : relativeDirectory + "/" + name;
-      const std::string fullPath = absoluteDirectory + "/" + name;
+      entry.getName(fileNameBuffer.data(), fileNameBuffer.size());
+      if (strcmp(fileNameBuffer.data(), ".") == 0 || strcmp(fileNameBuffer.data(), "..") == 0) continue;
+      const std::string relativePath =
+          relativeDirectory.empty() ? fileNameBuffer.data() : relativeDirectory + "/" + fileNameBuffer.data();
+      const std::string fullPath = absoluteDirectory + "/" + fileNameBuffer.data();
       if (fullPath.size() + strlen(PART_SUFFIX) > GoogleDriveClient::MAX_LOCAL_PATH_BYTES) {
         entry.close();
         dir.close();
-        errorMessage = "A local mirror path is too long";
+        errorMessage = tr(STR_GDRIVE_ERR_LOCAL_PATH_TOO_LONG);
         return false;
       }
       if (localTree.size() >= GoogleDriveClient::MAX_TREE_ENTRIES) {
         entry.close();
         dir.close();
-        errorMessage = "Local mirror exceeds the 300-entry limit";
+        errorMessage = tr(STR_GDRIVE_ERR_LOCAL_TOO_MANY);
         return false;
       }
 
@@ -341,14 +408,13 @@ bool GoogleDriveSyncActivity::scanLocalTree() {
       }
 
       std::string md5;
-      const std::string key = caseFoldAscii(relativePath);
       const auto remote = std::find_if(remoteTree.nodes.begin(), remoteTree.nodes.end(), [&](const DriveNode& node) {
-        return node.type == DriveNodeType::EPUB && caseFoldAscii(node.relativePath) == key;
+        return node.type == DriveNodeType::EPUB && equalsCaseInsensitiveAscii(node.relativePath, relativePath);
       });
       if (remote != remoteTree.nodes.end() && remote->size == size && !remote->md5Checksum.empty() &&
           !calculateFileMd5(fullPath, md5)) {
         dir.close();
-        errorMessage = "Failed to hash a local EPUB";
+        errorMessage = tr(STR_GDRIVE_ERR_HASH);
         return false;
       }
       localTree.push_back({LocalDriveNodeType::FILE, relativePath, size, std::move(md5)});
@@ -365,13 +431,13 @@ bool GoogleDriveSyncActivity::buildPlan() {
     return absolutePath(node.relativePath).size() + strlen(PART_SUFFIX) > GoogleDriveClient::MAX_LOCAL_PATH_BYTES;
   });
   if (hasOverlongPath) {
-    errorMessage = "A Drive path is too long for the selected local folder";
+    errorMessage = tr(STR_GDRIVE_ERR_MIRROR_PATH_TOO_LONG);
     return false;
   }
   if (!recoverArtifacts() || !scanLocalTree()) return false;
   const SyncPlanError result = buildGoogleDriveSyncPlan(remoteTree, localTree, plan);
   if (result != SyncPlanError::NONE) {
-    errorMessage = "Unable to build an exact mirror plan";
+    errorMessage = tr(STR_GDRIVE_ERR_BUILD_PLAN);
     return false;
   }
   return true;
@@ -394,20 +460,23 @@ void GoogleDriveSyncActivity::requestStartSync() {
 }
 
 void GoogleDriveSyncActivity::startSync() {
-  state = SyncState::SYNCING;
-  phase = SyncPhase::RENAME_PATHS;
-  phaseIndex = 0;
-  completedActions = 0;
-  cancelRequested = false;
-  currentName = tr(STR_GDRIVE_PREPARING);
+  {
+    RenderLock lock(*this);
+    state = SyncState::SYNCING;
+    phase = SyncPhase::RENAME_PATHS;
+    phaseIndex = 0;
+    completedActions = 0;
+    cancelRequested = false;
+    currentName = tr(STR_GDRIVE_PREPARING);
+    fileProgress = 0;
+    fileTotal = 0;
+  }
   requestUpdate(true);
 }
 
 bool GoogleDriveSyncActivity::renameNextPath() {
   const auto& rename = plan.caseRenames[phaseIndex];
-  currentName = rename.targetRelativePath;
-  fileProgress = fileTotal = 0;
-  requestUpdate(true);
+  setActionView(rename.targetRelativePath);
 
   const std::string source = absolutePath(rename.sourceRelativePath);
   const std::string target = absolutePath(rename.targetRelativePath);
@@ -439,8 +508,7 @@ bool GoogleDriveSyncActivity::prepareConflicts() {
   for (const auto& conflict : plan.typeConflicts) {
     const std::string finalPath = absolutePath(conflict.relativePath);
     const std::string backupPath = finalPath + BACKUP_SUFFIX;
-    currentName = conflict.relativePath;
-    requestUpdate(true);
+    setActionView(conflict.relativePath);
     if (Storage.exists(backupPath.c_str()) && !removePathRecursively(backupPath, false)) {
       rollbackConflicts();
       return false;
@@ -499,9 +567,7 @@ bool GoogleDriveSyncActivity::removeConflictBackups() {
 
 bool GoogleDriveSyncActivity::createNextDirectory() {
   const std::string& relative = plan.directoriesToCreate[phaseIndex];
-  currentName = relative;
-  fileProgress = fileTotal = 0;
-  requestUpdate(true);
+  setActionView(relative);
   const std::string path = absolutePath(relative);
   if (Storage.exists(path.c_str())) {
     HalFile existing = Storage.open(path.c_str());
@@ -514,10 +580,7 @@ bool GoogleDriveSyncActivity::createNextDirectory() {
 
 bool GoogleDriveSyncActivity::downloadNextEpub() {
   const DriveNode& file = remoteTree.nodes[plan.epubsToDownload[phaseIndex]];
-  currentName = file.relativePath;
-  fileProgress = 0;
-  fileTotal = file.size;
-  requestUpdate(true);
+  setActionView(file.relativePath, file.size);
 
   const std::string destination = absolutePath(file.relativePath);
   const std::string partPath = destination + PART_SUFFIX;
@@ -527,10 +590,28 @@ bool GoogleDriveSyncActivity::downloadNextEpub() {
   const auto result = HttpDownloader::downloadToFile(
       GoogleDriveClient::downloadUrl(file.id, GDRIVE_STORE.getApiKey()), partPath,
       [this](const size_t downloaded, const size_t total) {
-        fileProgress = downloaded;
-        if (total > 0) fileTotal = total;
         mappedInput.update();
         if (mappedInput.wasPressed(MappedInputManager::Button::Back)) cancelRequested = true;
+
+        bool shouldRender = false;
+        int percent = -1;
+        if (total > 0) {
+          percent = static_cast<int>(std::min<uint64_t>(100, static_cast<uint64_t>(downloaded) * 100 / total));
+          shouldRender = lastRenderedFilePercent < 0 || percent == 100 ||
+                         percent >= lastRenderedFilePercent + PROGRESS_RENDER_PERCENT_STEP;
+        } else {
+          shouldRender =
+              lastRenderedProgressBytes == 0 || downloaded - lastRenderedProgressBytes >= UNKNOWN_TOTAL_RENDER_STEP;
+        }
+        if (!shouldRender) return;
+
+        {
+          RenderLock lock(*this);
+          fileProgress = downloaded;
+          if (total > 0) fileTotal = total;
+          lastRenderedFilePercent = percent;
+          lastRenderedProgressBytes = downloaded;
+        }
         requestUpdate(true);
       },
       &cancelRequested);
@@ -549,7 +630,7 @@ bool GoogleDriveSyncActivity::downloadNextEpub() {
   }
   if (!file.md5Checksum.empty()) {
     std::string md5;
-    if (!calculateFileMd5(partPath, md5) || caseFoldAscii(md5) != caseFoldAscii(file.md5Checksum)) {
+    if (!calculateFileMd5(partPath, md5) || !equalsCaseInsensitiveAscii(md5, file.md5Checksum)) {
       Storage.remove(partPath.c_str());
       return false;
     }
@@ -582,9 +663,7 @@ bool GoogleDriveSyncActivity::downloadNextEpub() {
 
 bool GoogleDriveSyncActivity::deleteNextFile() {
   const std::string& relative = plan.filesToDelete[phaseIndex];
-  currentName = relative;
-  fileProgress = fileTotal = 0;
-  requestUpdate(true);
+  setActionView(relative);
   const std::string path = absolutePath(relative);
   if (FsHelpers::hasEpubExtension(path)) {
     clearBookCache(path);
@@ -599,9 +678,7 @@ bool GoogleDriveSyncActivity::deleteNextFile() {
 
 bool GoogleDriveSyncActivity::deleteNextDirectory() {
   const std::string& relative = plan.directoriesToDelete[phaseIndex];
-  currentName = relative;
-  fileProgress = fileTotal = 0;
-  requestUpdate(true);
+  setActionView(relative);
   const std::string path = absolutePath(relative);
   if (!Storage.exists(path.c_str()) || Storage.rmdir(path.c_str())) {
     deletedDirectoryCount++;
@@ -612,17 +689,23 @@ bool GoogleDriveSyncActivity::deleteNextDirectory() {
 
 void GoogleDriveSyncActivity::finishIncomplete(const std::string& message) {
   if (!rollbackConflicts()) failedCount++;
-  state = SyncState::INCOMPLETE;
-  errorMessage = message;
-  fileProgress = fileTotal = 0;
+  {
+    RenderLock lock(*this);
+    state = SyncState::INCOMPLETE;
+    errorMessage = message;
+    fileProgress = fileTotal = 0;
+  }
   requestUpdate();
 }
 
 void GoogleDriveSyncActivity::finishSuccess() {
   if (RECENT_BOOKS.pruneMissing()) RECENT_BOOKS.saveToFile();
-  state = failedCount == 0 ? SyncState::DONE : SyncState::INCOMPLETE;
-  if (failedCount != 0 && errorMessage.empty()) errorMessage = tr(STR_GDRIVE_INCOMPLETE);
-  fileProgress = fileTotal = 0;
+  {
+    RenderLock lock(*this);
+    state = failedCount == 0 ? SyncState::DONE : SyncState::INCOMPLETE;
+    if (failedCount != 0 && errorMessage.empty()) errorMessage = tr(STR_GDRIVE_INCOMPLETE);
+    fileProgress = fileTotal = 0;
+  }
   requestUpdate();
 }
 
@@ -636,11 +719,11 @@ void GoogleDriveSyncActivity::processNextAction() {
       if (phaseIndex < plan.caseRenames.size()) {
         if (!renameNextPath()) {
           failedCount++;
-          finishIncomplete("Failed to match Drive path casing");
+          finishIncomplete(tr(STR_GDRIVE_ERR_MATCH_CASING));
           return;
         }
         phaseIndex++;
-        completedActions++;
+        markActionCompleted();
         return;
       }
       phase = SyncPhase::PREPARE_CONFLICTS;
@@ -654,7 +737,7 @@ void GoogleDriveSyncActivity::processNextAction() {
       }
       if (!prepareConflicts()) {
         failedCount++;
-        finishIncomplete("Failed to prepare a path replacement");
+        finishIncomplete(tr(STR_GDRIVE_ERR_PREPARE_REPLACEMENT));
         return;
       }
       phase = SyncPhase::CREATE_DIRECTORIES;
@@ -669,11 +752,11 @@ void GoogleDriveSyncActivity::processNextAction() {
       if (phaseIndex < plan.directoriesToCreate.size()) {
         if (!createNextDirectory()) {
           failedCount++;
-          finishIncomplete("Failed to create a mirror directory");
+          finishIncomplete(tr(STR_GDRIVE_ERR_CREATE_DIRECTORY));
           return;
         }
         phaseIndex++;
-        completedActions++;
+        markActionCompleted();
         return;
       }
       phase = SyncPhase::DOWNLOAD_EPUBS;
@@ -684,15 +767,18 @@ void GoogleDriveSyncActivity::processNextAction() {
       if (phaseIndex < plan.epubsToDownload.size()) {
         if (!downloadNextEpub() && !cancelRequested) failedCount++;
         phaseIndex++;
-        completedActions++;
+        markActionCompleted();
         return;
       }
       if (cancelRequested || failedCount > 0) {
         finishIncomplete(cancelRequested ? tr(STR_SYNC_CANCELLED) : tr(STR_GDRIVE_INCOMPLETE));
         return;
       }
-      state = SyncState::FINALIZING;
-      currentName = tr(STR_GDRIVE_FINALIZING);
+      {
+        RenderLock lock(*this);
+        state = SyncState::FINALIZING;
+        currentName = tr(STR_GDRIVE_FINALIZING);
+      }
       requestUpdate(true);
       if (!removeConflictBackups()) failedCount++;
       phase = SyncPhase::DELETE_FILES;
@@ -703,7 +789,7 @@ void GoogleDriveSyncActivity::processNextAction() {
       if (phaseIndex < plan.filesToDelete.size()) {
         if (!deleteNextFile()) failedCount++;
         phaseIndex++;
-        completedActions++;
+        markActionCompleted();
         return;
       }
       phase = SyncPhase::DELETE_DIRECTORIES;
@@ -714,7 +800,7 @@ void GoogleDriveSyncActivity::processNextAction() {
       if (phaseIndex < plan.directoriesToDelete.size()) {
         if (!deleteNextDirectory()) failedCount++;
         phaseIndex++;
-        completedActions++;
+        markActionCompleted();
         return;
       }
       finishSuccess();
@@ -768,7 +854,7 @@ void GoogleDriveSyncActivity::render(RenderLock&&) {
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
   const auto& metrics = UITheme::getInstance().getMetrics();
-  renderer.drawCenteredText(UI_12_FONT_ID, 15, tr(STR_GDRIVE), true, EpdFontFamily::BOLD);
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_GDRIVE));
   char buf[128];
 
   switch (state) {

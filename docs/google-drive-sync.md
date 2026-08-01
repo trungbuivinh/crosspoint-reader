@@ -98,6 +98,13 @@ Press **Back** during the download phase to cancel. Incomplete downloads are
 discarded and the deletion phase is withheld; downloads that already completed
 may remain. The result is reported as incomplete rather than successful.
 
+Drive listing responses must be complete, structurally balanced JSON documents;
+a truncated response is rejected before a mirror plan can be approved. Downloads
+are written to a temporary file and must match both the advertised byte size and,
+when supplied by Drive, the MD5 checksum before replacing the existing EPUB.
+Progress rendering is rate-limited so e-ink refresh work does not starve the TLS
+transfer, while the Cancel button continues to be polled for chunked responses.
+
 ## Limits and unsupported trees
 
 - Maximum 300 nodes per side: Drive directories/EPUBs remotely and all entries
@@ -110,6 +117,9 @@ may remain. The result is reported as incomplete rather than successful.
   rejected before local changes are made.
 - Drive names that cannot be represented losslessly on FAT are rejected rather
   than silently renamed.
+- Parser and checksum scratch storage is bounded and allocated with explicit
+  out-of-memory handling; the activity preallocates its two 300-entry tree
+  arrays before Wi-Fi/TLS starts to reduce fragmentation.
 
 ## Troubleshooting
 

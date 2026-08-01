@@ -605,8 +605,7 @@ void FontDownloadActivity::render(RenderLock&&) {
     int barY = centerY + metrics.verticalSpacing;
     const int progressHeight = GUI.measureProgressBar(renderer);
     GUI.drawProgressBar(
-        renderer,
-        Rect{metrics.contentSidePadding, barY, pageWidth - metrics.contentSidePadding * 2, progressHeight},
+        renderer, Rect{metrics.contentSidePadding, barY, pageWidth - metrics.contentSidePadding * 2, progressHeight},
         static_cast<int>(progress * 100), 100);
 
     const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), "", "", "");

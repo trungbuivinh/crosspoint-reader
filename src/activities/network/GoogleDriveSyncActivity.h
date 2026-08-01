@@ -1,6 +1,8 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -68,6 +70,12 @@ class GoogleDriveSyncActivity final : public Activity {
   size_t fileTotal = 0;
   bool cancelRequested = false;
   std::string errorMessage;
+  // SdFat long names can occupy 255 UTF-8 bytes. Keep this reusable buffer in
+  // the heap-allocated activity rather than in recursive scan stack frames.
+  std::array<char, 512> fileNameBuffer{};
+  std::unique_ptr<uint8_t[]> md5Buffer;
+  int lastRenderedFilePercent = -1;
+  size_t lastRenderedProgressBytes = 0;
 
   void checkAndConnectWifi();
   void launchWifiSelection();
@@ -76,7 +84,10 @@ class GoogleDriveSyncActivity final : public Activity {
   bool buildPlan();
   bool recoverArtifacts();
   bool scanLocalTree();
-  bool calculateFileMd5(const std::string& path, std::string& out) const;
+  bool calculateFileMd5(const std::string& path, std::string& out);
+  bool ensureMd5Buffer();
+  void setActionView(const std::string& name, size_t total = 0);
+  void markActionCompleted();
 
   void requestStartSync();
   void startSync();

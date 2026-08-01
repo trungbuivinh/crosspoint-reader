@@ -138,6 +138,16 @@ TEST(DriveListJsonParser, EmptyFilesArray) {
   EXPECT_STREQ(parser.getNextPageToken(), "");
 }
 
+TEST(DriveListJsonParser, TruncatedPageFailsFinalization) {
+  const char* json = R"({"files":[{"id":"abc","name":"book.epub")";
+  Collector c;
+  DriveListJsonParser parser(&c, Collector::onFile);
+  parser.feed(json, strlen(json));
+
+  EXPECT_FALSE(parser.finish());
+  EXPECT_TRUE(parser.hasError());
+}
+
 TEST(DriveListJsonParser, TruncatesOverlongName) {
   Collector c;
   DriveListJsonParser parser(&c, Collector::onFile);

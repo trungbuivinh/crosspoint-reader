@@ -9,9 +9,16 @@ If needed, see [Getting Started](./getting-started.md).
 
 ```sh
 ./bin/clang-format-fix
+cmake -S test -B build/test -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/test
+ctest --test-dir build/test --output-on-failure -j
 pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
 pio run
+pio run -e gh_release
 ```
+
+The tag release workflow repeats formatting, host tests, cppcheck, and the
+`gh_release` build before it is allowed to publish `firmware.bin`.
 
 ## Flash and monitor
 
