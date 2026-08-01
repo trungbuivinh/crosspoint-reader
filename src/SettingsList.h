@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include "GoogleDriveStore.h"
 #include "KOReaderCredentialStore.h"
 #include "activities/settings/SettingsActivity.h"
 
@@ -88,6 +89,20 @@ inline SettingInfo buildFontFamilySetting(const SdCardFontRegistry* registry) {
   };
 
   return s;
+}
+
+// Google Drive settings accessors. Named functions (not initializer lambdas)
+// because cppcheck 2.11's valueFlow analysis fails internally on additional
+// lambda bodies inside getSettingsList()'s braced initializer.
+inline std::string gdriveGetFolderId() { return GDRIVE_STORE.getFolderId(); }
+inline void gdriveSetFolderId(const std::string& v) {
+  GDRIVE_STORE.setFolderId(v);
+  GDRIVE_STORE.saveToFile();  // no-op unless a setter changed a value
+}
+inline std::string gdriveGetApiKey() { return GDRIVE_STORE.getApiKey(); }
+inline void gdriveSetApiKey(const std::string& v) {
+  GDRIVE_STORE.setApiKey(v);
+  GDRIVE_STORE.saveToFile();  // no-op unless a setter changed a value
 }
 
 // Shared settings list used by both the device settings UI and the web settings API.
@@ -224,6 +239,11 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
               KOREADER_STORE.saveToFile();
             },
             "koMatchMethod", StrId::STR_KOREADER_SYNC),
+        // --- Google Drive Sync (web-only, uses GoogleDriveStore) ---
+        SettingInfo::DynamicString(StrId::STR_GDRIVE_FOLDER_ID, &gdriveGetFolderId, &gdriveSetFolderId,
+                                   "gdriveFolderId", StrId::STR_GDRIVE_SYNC),
+        SettingInfo::DynamicString(StrId::STR_GDRIVE_API_KEY, &gdriveGetApiKey, &gdriveSetApiKey, "gdriveApiKey",
+                                   StrId::STR_GDRIVE_SYNC),
         // --- Status Bar Settings (web-only, uses StatusBarSettingsActivity) ---
         SettingInfo::Toggle(StrId::STR_CHAPTER_PAGE_COUNT, &CrossPointSettings::statusBarChapterPageCount,
                             "statusBarChapterPageCount", StrId::STR_CUSTOMISE_STATUS_BAR),

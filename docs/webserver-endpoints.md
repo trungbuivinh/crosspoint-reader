@@ -247,6 +247,17 @@ Successful response:
 Applied 2 setting(s)
 ```
 
+Google Drive Sync configuration is exposed through this generic settings API as
+two `string` settings: `gdriveFolderId` and `gdriveApiKey`. The API key is
+stored obfuscated and is not returned by `GET /api/settings` after saving.
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"gdriveFolderId":"1AbCdEf...","gdriveApiKey":"AIza..."}' \
+  http://crosspoint.local/api/settings
+```
+
 ## Font Management API
 
 ### `GET /api/fonts`

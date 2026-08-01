@@ -25,6 +25,7 @@ CrossPoint is open-source e-reader firmware - community-built, fully hackable, f
 - **Wireless workflows**:
   
   - File transfer web UI
+  - Google Drive sync (pull books from a shared Drive folder)
   - EPUB Optimizer
   - Web settings UI/API (edit many device settings from browser)
   - WebSocket fast uploads
@@ -138,6 +139,7 @@ Conversion runs the firmware repo's `lib/EpdFont/scripts/fontconvert_sdcard.py` 
 - [User Guide](./USER_GUIDE.md)
 - [Web server usage](./docs/webserver.md)
 - [Web server endpoints](./docs/webserver-endpoints.md)
+- [Google Drive sync](./docs/google-drive-sync.md)
 - [Project scope](./SCOPE.md)
 - [Contributing docs](./docs/contributing/README.md)
 

@@ -103,7 +103,7 @@ The Recent Books screen lists the most recently opened books in a chronological 
 
 ### 3.5 File Transfer Screen
 
-The File Transfer screen allows you to upload and manage files on the device. When you enter the screen, choose **Join a Network**, **Calibre Wireless**, or **Create Hotspot**. The reader then starts the web server for the selected mode.
+The File Transfer screen allows you to upload and manage files on the device. When you enter the screen, choose **Join a Network**, **Calibre Wireless**, **Create Hotspot**, or **Google Drive**. The first three start the web server for the selected mode; **Google Drive** pulls books from a shared Drive folder (see [3.5.2](#352-google-drive-sync)).
 
 See the [web server docs](./docs/webserver.md) for more information on how to connect to the web server and upload files.
 
@@ -159,6 +159,31 @@ The CrossPoint plugin will connect to your device, create a folder for the book'
 #### Removing a Book
 
 Books cannot be removed from your device through Calibre. Use the web interface instead.
+
+### 3.5.2 Google Drive Sync
+
+Google Drive Sync **pulls** books from a shared Google Drive folder over Wi-Fi, rather than pushing them from a computer. Drop books into the folder from anywhere, then run a one-button sync on the reader.
+
+**One-time setup:**
+
+1. In Google Drive, share a folder as **Anyone with the link** (Viewer) and copy its **folder ID** (the last segment of the folder URL).
+2. In the [Google Cloud Console](https://console.cloud.google.com/), enable the **Google Drive API** and create an **API key**.
+3. On the reader, open **File Transfer → Join a Network**, connect to Wi-Fi, then in a browser open `http://<device-ip>/settings` and fill in **Drive Folder ID** and **Drive API Key** under the **Google Drive Sync** section.
+
+**Syncing:**
+
+1. On the reader, open **File Transfer → Google Drive**.
+2. After connecting to Wi-Fi, the reader lists the folder and shows how many books need downloading.
+3. Select **Start Sync**. Progress is shown per file and overall; press **Back** to cancel.
+
+Behavior notes:
+
+- Only `.epub`, `.txt`, `.xtc`, `.xtch`, and `.md` files are synced. Google-native Docs/Sheets/Slides are skipped.
+- A file is downloaded when it is missing locally or its size differs from Drive, so re-running a sync only fetches what changed.
+- Books download to the SD-card root and appear immediately in Browse Files.
+- No Google sign-in is used; only a link-shared folder is reachable, and the API key is stored obfuscated on the SD card.
+
+For full setup instructions, Google Cloud steps, and troubleshooting, see the [Google Drive Sync guide](./docs/google-drive-sync.md).
 
 ### 3.6 Settings
 
