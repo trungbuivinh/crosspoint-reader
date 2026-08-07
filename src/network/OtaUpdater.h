@@ -2,6 +2,8 @@
 
 #include <string>
 
+enum class OtaUpdateSource { Official, Custom };
+
 class OtaUpdater {
   bool updateAvailable = false;
   std::string latestVersion;
@@ -33,6 +35,6 @@ class OtaUpdater {
   OtaUpdater() = default;
   bool isUpdateNewer() const;
   const std::string& getLatestVersion() const;
-  OtaUpdaterError checkForUpdate();
+  OtaUpdaterError checkForUpdate(OtaUpdateSource source);
   OtaUpdaterError installUpdate(ProgressCallback onProgress = nullptr, void* ctx = nullptr);
 };

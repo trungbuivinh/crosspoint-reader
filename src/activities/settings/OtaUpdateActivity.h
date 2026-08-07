@@ -2,9 +2,11 @@
 
 #include "activities/Activity.h"
 #include "network/OtaUpdater.h"
+#include "util/ButtonNavigator.h"
 
 class OtaUpdateActivity : public Activity {
   enum State {
+    SOURCE_SELECTION,
     WIFI_SELECTION,
     CHECKING_FOR_UPDATE,
     WAITING_CONFIRMATION,
@@ -18,7 +20,10 @@ class OtaUpdateActivity : public Activity {
   // Can't initialize this to 0 or the first render doesn't happen
   static constexpr unsigned int UNINITIALIZED_PERCENTAGE = 111;
 
-  State state = WIFI_SELECTION;
+  State state = SOURCE_SELECTION;
+  ButtonNavigator buttonNavigator;
+  int selectedSourceIndex = 1;
+  OtaUpdateSource updateSource = OtaUpdateSource::Custom;
   unsigned int lastUpdaterPercentage = UNINITIALIZED_PERCENTAGE;
   OtaUpdater updater;
   // Optional detail line shown under the generic "Update failed" heading.
@@ -26,6 +31,7 @@ class OtaUpdateActivity : public Activity {
   // nullptr means no extra detail.
   const char* failedDetail = nullptr;
 
+  void beginWifiSelection();
   void onWifiSelectionComplete(bool success);
   void runUpdateInstall();
 
