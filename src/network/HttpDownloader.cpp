@@ -8,6 +8,8 @@
 #include <functional>
 #include <string>
 
+#include "TrustedRootCertificates.h"
+
 #if defined(FREEINK_NET_WOLFSSL)
 #include <SecureHttpClient.h>
 
@@ -45,6 +47,8 @@ bool isRedirect(int status) {
   return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
 }
 
+bool isHttpsUrl(const std::string& url) { return url.rfind("https://", 0) == 0; }
+
 #if defined(FREEINK_NET_WOLFSSL)
 HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std::string& username,
                                          const std::string& password, Sink& sink) {
@@ -53,7 +57,7 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
   for (int hop = 0; hop <= MAX_REDIRECTS; ++hop) {
     freeink::SecureHttpClient http;
     http.setTimeout(HTTP_TIMEOUT_MS);
-    http.setInsecure();
+    http.setCACert(TrustedRootCertificates::bundle());
     if (!http.begin(url)) {
       LOG_ERR("HTTP", "wolfSSL bad URL: %s", url.c_str());
       return HttpDownloader::HTTP_ERROR;
@@ -75,7 +79,9 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
           if (sink.total == 0 && http.hasContentLength()) sink.total = http.getContentLength();
           if (!sink.write(data, len)) return false;
           sink.downloaded += len;
-          if (sink.progress && sink.total > 0) sink.progress(sink.downloaded, sink.total);
+          // Progress callbacks also poll cancellation. Invoke them even when
+          // a chunked response has no Content-Length.
+          if (sink.progress) sink.progress(sink.downloaded, sink.total);
           return true;
         },
         [&sink]() { return sink.cancelFlag && *sink.cancelFlag; });
@@ -87,7 +93,9 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
     }
     if (isRedirect(status)) {
       const std::string location = http.getHeader("location");
-      if (location.empty() || !freeink::SecureHttpClient::resolveUrl(url, location, url)) {
+      const bool wasHttps = isHttpsUrl(url);
+      if (location.empty() || !freeink::SecureHttpClient::resolveUrl(url, location, url) ||
+          (wasHttps && !isHttpsUrl(url))) {
         LOG_ERR("HTTP", "wolfSSL bad redirect: %d", status);
         return HttpDownloader::HTTP_ERROR;
       }
@@ -203,7 +211,9 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
       return HttpDownloader::FILE_ERROR;
     }
     sink.downloaded += read;
-    if (sink.progress && sink.total > 0) sink.progress(sink.downloaded, sink.total);
+    // Keep polling the progress/cancellation callback when Content-Length is
+    // unknown (chunked or connection-close-delimited response).
+    if (sink.progress) sink.progress(sink.downloaded, sink.total);
   }
 
   const bool complete = esp_http_client_is_complete_data_received(client);

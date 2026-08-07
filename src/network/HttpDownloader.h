@@ -5,9 +5,9 @@
 #include <string>
 
 /**
- * HTTP client utility for fetching content and downloading files. Built on
- * esp_http_client: https is verified against the CA bundle, plain http is
- * used for local servers (transport is chosen from the URL scheme).
+ * HTTP client utility for fetching content and downloading files. HTTPS uses
+ * verified wolfSSL or ESP-TLS transport; plain HTTP remains available for
+ * explicitly configured local servers.
  */
 class HttpDownloader {
  public:
