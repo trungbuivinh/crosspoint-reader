@@ -67,7 +67,7 @@ Drive: Shared Library/          SD card: /Books/Drive/
 There is no Google account sign-in on the reader. The API key can only access
 content made public through link sharing.
 
-### 3. Select the local mirror
+### 3. Select the book folder on the device
 
 1. On the reader, open **File Transfer → Join a Network**.
 2. Open `http://<device-ip>/settings` or
@@ -75,7 +75,7 @@ content made public through link sharing.
 3. In **Google Drive Sync**, set:
    - **Drive Folder ID**
    - **Drive API Key**
-   - **Local Mirror Folder** — use **Choose** to browse the SD card
+   - **Book Folder on Device** — use **Choose** to browse the SD card
 4. Save settings.
 
 The local target must already exist and cannot be `/` or a protected system
@@ -115,7 +115,7 @@ may remain. The result is reported as incomplete rather than successful.
 
 | Symptom | Likely cause |
 |---------|--------------|
-| Google Drive is not configured | Folder ID, API key, or Local Mirror Folder is missing. |
+| Google Drive is not configured | Folder ID, API key, or Book Folder on Device is missing. |
 | Failed to fetch the Drive tree | Folder is not link-shared, the ID/key is wrong, Drive API is disabled, or the network is offline. |
 | Name collision or invalid name | Two siblings differ only by case, or a Drive name is not FAT-compatible. |
 | Sync incomplete | A download, checksum, filesystem operation, or user cancellation prevented an exact result. Deletions were withheld if transfer failed. |
