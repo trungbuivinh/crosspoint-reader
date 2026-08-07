@@ -28,6 +28,7 @@ networks or in hotspot mode when you control who is connected.
 | **Join Network** | You want the reader to join an existing Wi-Fi network. |
 | **Calibre Wireless** | You want to receive books from the CrossPoint Calibre plugin workflow. |
 | **Create Hotspot** | You want the reader to create its own open Wi-Fi network. |
+| **Google Drive** | You want the reader to pull books from a shared Google Drive folder. |
 
 ## Join Network Mode
 
@@ -75,6 +76,17 @@ upload protocol.
 For Calibre OPDS browsing, add `/opds` to the catalog URL when configuring an
 OPDS server.
 
+## Google Drive Mode
+
+Google Drive mode does not start the web server. Instead, the reader pulls books
+from a shared Google Drive folder: it connects to Wi-Fi, recursively lists the
+folder tree, and makes a dedicated local EPUB tree match it exactly.
+
+Configuration (folder ID + API key) is entered from the web settings page in
+**Join Network** mode, under the **Google Drive Sync** section. Configure the
+folder ID and API key, then choose a non-root **Local Mirror Folder**. For the full
+setup and Google Cloud steps, see [google-drive-sync.md](./google-drive-sync.md).
+
 ## Web Interface
 
 The browser UI has four primary pages.
@@ -110,6 +122,11 @@ cards for:
 
 Passwords are accepted when adding or editing entries, but saved passwords are
 not returned by the API.
+
+The **Google Drive Sync** section holds the **Drive Folder ID**, **Drive API
+Key**, and web directory picker for the **Local Mirror Folder** used by Google
+Drive mode. The API key is stored obfuscated on the SD card. Treat the settings
+API as trusted local-network access because it can read configured setting values.
 
 ### Fonts
 

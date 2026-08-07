@@ -253,6 +253,19 @@ Successful response:
 Applied 2 setting(s)
 ```
 
+Google Drive Sync configuration is exposed through this generic settings API as
+two `string` settings (`gdriveFolderId`, `gdriveApiKey`) and one `directory`
+setting (`gdriveLocalFolder`). The API key is
+stored obfuscated on the SD card. `GET /api/settings` exposes configured setting
+values, so only use this endpoint on a trusted local network.
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"gdriveFolderId":"1AbCdEf...","gdriveApiKey":"AIza...","gdriveLocalFolder":"/Books/Drive"}' \
+  http://crosspoint.local/api/settings
+```
+
 ## Font Management API
 
 ### `GET /api/fonts`
