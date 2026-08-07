@@ -42,6 +42,17 @@ jobs:
         with:
           python-version: '3.14'
 
+      - name: Install build and formatting tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build wget
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 21
+          sudo apt-get install -y clang-format-21
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -57,6 +68,27 @@ jobs:
           path: ~/.platformio
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-${{ runner.os }}-
+
+      - name: Audit fork invariants
+        run: .claude/skills/crosspoint-upstream-release/scripts/audit_fork_invariants.sh "${GITHUB_REF_NAME}"
+
+      - name: Run clang-format
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATH="/usr/lib/llvm-21/bin:$PATH" ./bin/clang-format-fix
+          git diff --exit-code
+
+      - name: Run host unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S test -B build/test -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/test
+          ctest --test-dir build/test --output-on-failure -j 2
+
+      - name: Run cppcheck
+        run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
 
       - name: Build CrossPoint
         run: pio run -e gh_release
