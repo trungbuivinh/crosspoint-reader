@@ -1,5 +1,6 @@
 #include "UrlUtils.h"
 
+#include <cctype>
 #include <cstdio>
 
 namespace UrlUtils {
@@ -89,6 +90,21 @@ std::string buildUrl(const std::string& serverUrl, const std::string& path) {
     return encodeUnsafeUrlChars(base + path);
   }
   return encodeUnsafeUrlChars(base + "/" + path);
+}
+
+std::string urlEncode(const std::string& s) {
+  std::string out;
+  out.reserve(s.size() * 3);  // worst case: every char becomes %XX
+  for (unsigned char c : s) {
+    if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+      out += static_cast<char>(c);
+    } else {
+      char buf[4];
+      snprintf(buf, sizeof(buf), "%%%02X", c);
+      out += buf;
+    }
+  }
+  return out;
 }
 
 }  // namespace UrlUtils

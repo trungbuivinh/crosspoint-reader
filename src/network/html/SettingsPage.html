@@ -249,6 +249,65 @@
     .btn-save-server:hover {
       background-color: #219a52;
     }
+    .directory-control {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .directory-control input {
+      width: 220px;
+    }
+    .directory-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: rgba(0, 0, 0, 0.55);
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .directory-modal.open {
+      display: flex;
+    }
+    .directory-dialog {
+      width: min(560px, 100%);
+      max-height: 80vh;
+      overflow: auto;
+      background: var(--card-bg);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .directory-path {
+      font-family: monospace;
+      overflow-wrap: anywhere;
+      padding: 8px;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    .directory-list button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 10px;
+      margin: 4px 0;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      background: var(--bg);
+      color: var(--font-color);
+      cursor: pointer;
+    }
+    .directory-warning {
+      color: #c0392b;
+      font-size: 0.9em;
+      margin: 12px 0;
+    }
+    .directory-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
     @media (max-width: 600px) {
       body {
         padding: 10px;
@@ -307,6 +366,21 @@
     <p style="text-align: center; color: #95a5a6; margin: 0;">
       CrossPoint E-Reader • Open Source
     </p>
+  </div>
+
+  <div id="directory-modal" class="directory-modal" role="dialog" aria-modal="true">
+    <div class="directory-dialog">
+      <h2>Choose Google Drive local folder</h2>
+      <div id="directory-path" class="directory-path">/</div>
+      <div id="directory-list" class="directory-list"></div>
+      <p class="directory-warning">
+        This is a managed mirror. Files and folders not present in the shared Drive library will be deleted during sync.
+      </p>
+      <div class="directory-actions">
+        <button class="btn-small" onclick="closeDirectoryPicker()">Cancel</button>
+        <button class="btn-small btn-save-server" id="directory-use" onclick="useDirectoryPickerPath()">Use this folder</button>
+      </div>
+    </div>
   </div>
 
 <script>
@@ -368,6 +442,14 @@
         ' oninput="handleSettingChanged(\'' + setting.key + '\')">';
     }
 
+    if (setting.type === 'directory') {
+      const val = setting.value || '';
+      return '<span class="directory-control">' +
+        '<input type="text" readonly id="' + id + '" value="' + escapeHtml(val) + '">' +
+        '<button type="button" class="btn-small btn-add" onclick="openDirectoryPicker(\'' + setting.key + '\')">Choose</button>' +
+        '</span>';
+    }
+
     return '';
   }
 
@@ -384,7 +466,7 @@
     if (setting.type === 'value') {
       return parseInt(el.value, 10);
     }
-    if (setting.type === 'string') {
+    if (setting.type === 'string' || setting.type === 'directory') {
       return el.value;
     }
     return undefined;
@@ -497,6 +579,77 @@
       updateSettingsVisibility();
     }
     markChanged();
+  }
+
+  let directorySettingKey = null;
+  let directoryPickerPath = '/';
+
+  function normalizeDirectoryPath(path) {
+    if (!path || path === '/') return '/';
+    const parts = path.split('/').filter(function(part) { return part && part !== '.'; });
+    return '/' + parts.join('/');
+  }
+
+  function joinDirectoryPath(parent, child) {
+    return normalizeDirectoryPath((parent === '/' ? '' : parent) + '/' + child);
+  }
+
+  function parentDirectoryPath(path) {
+    const parts = normalizeDirectoryPath(path).split('/').filter(Boolean);
+    parts.pop();
+    return parts.length ? '/' + parts.join('/') : '/';
+  }
+
+  async function loadDirectoryPickerPath(path) {
+    directoryPickerPath = normalizeDirectoryPath(path);
+    document.getElementById('directory-path').textContent = directoryPickerPath;
+    const list = document.getElementById('directory-list');
+    list.innerHTML = '<div class="loader-container"><span class="loader"></span></div>';
+    document.getElementById('directory-use').disabled = directoryPickerPath === '/';
+
+    try {
+      const response = await fetch('/api/files?path=' + encodeURIComponent(directoryPickerPath) + '&_=' + Date.now());
+      if (!response.ok) throw new Error('Unable to list folder');
+      const entries = (await response.json())
+        .filter(function(entry) { return entry.isDirectory; })
+        .sort(function(a, b) { return a.name.localeCompare(b.name); });
+
+      let html = '';
+      if (directoryPickerPath !== '/') {
+        html += '<button type="button" data-path="' +
+          escapeHtml(parentDirectoryPath(directoryPickerPath)) + '">📁 ..</button>';
+      }
+      entries.forEach(function(entry) {
+        const nextPath = joinDirectoryPath(directoryPickerPath, entry.name);
+        html += '<button type="button" data-path="' + escapeHtml(nextPath) + '">📁 ' +
+          escapeHtml(entry.name) + '</button>';
+      });
+      list.innerHTML = html || '<p>No subfolders</p>';
+      list.querySelectorAll('button[data-path]').forEach(function(button) {
+        button.addEventListener('click', function() { loadDirectoryPickerPath(button.dataset.path); });
+      });
+    } catch (error) {
+      list.innerHTML = '<p class="directory-warning">' + escapeHtml(error.message) + '</p>';
+    }
+  }
+
+  function openDirectoryPicker(key) {
+    directorySettingKey = key;
+    const current = getControlValue(key) || '/';
+    document.getElementById('directory-modal').classList.add('open');
+    loadDirectoryPickerPath(current);
+  }
+
+  function closeDirectoryPicker() {
+    document.getElementById('directory-modal').classList.remove('open');
+    directorySettingKey = null;
+  }
+
+  function useDirectoryPickerPath() {
+    if (!directorySettingKey || directoryPickerPath === '/') return;
+    setControlValue(directorySettingKey, directoryPickerPath);
+    handleSettingChanged(directorySettingKey);
+    closeDirectoryPicker();
   }
 
   async function loadSettings() {

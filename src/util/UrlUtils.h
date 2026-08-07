@@ -25,4 +25,10 @@ std::string encodeUnsafeUrlChars(const std::string& url);
  */
 std::string buildUrl(const std::string& serverUrl, const std::string& path);
 
+/**
+ * Percent-encode a string for use as a URL query parameter value
+ * (RFC 3986 unreserved characters pass through unchanged).
+ */
+std::string urlEncode(const std::string& s);
+
 }  // namespace UrlUtils

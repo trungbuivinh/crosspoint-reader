@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include "GoogleDriveStore.h"
 #include "KOReaderCredentialStore.h"
 #include "ReaderFontSizes.h"
 #include "activities/settings/SettingsActivity.h"
@@ -176,6 +177,28 @@ inline SettingInfo buildDictionarySetting(const std::vector<DictionaryEntry>& di
   };
 
   return s;
+}
+
+// Google Drive settings accessors. Named functions (not initializer lambdas)
+// because cppcheck 2.11's valueFlow analysis fails internally on additional
+// lambda bodies inside getSettingsList()'s braced initializer.
+inline std::string gdriveGetFolderId() { return GDRIVE_STORE.getFolderId(); }
+inline void gdriveSetFolderId(const std::string& v) {
+  GDRIVE_STORE.setFolderId(v);
+  GDRIVE_STORE.saveToFile();  // no-op unless a setter changed a value
+}
+inline std::string gdriveGetApiKey() { return GDRIVE_STORE.getApiKey(); }
+inline void gdriveSetApiKey(const std::string& v) {
+  GDRIVE_STORE.setApiKey(v);
+  GDRIVE_STORE.saveToFile();  // no-op unless a setter changed a value
+}
+inline std::string gdriveGetLocalFolder() { return GDRIVE_STORE.getLocalFolder(); }
+inline void gdriveSetLocalFolder(const std::string& v) {
+  GDRIVE_STORE.setLocalFolder(v);
+  GDRIVE_STORE.saveToFile();
+}
+inline bool gdriveValidateLocalFolder(const std::string& input, std::string& normalized, std::string& error) {
+  return GoogleDriveStore::validateLocalFolder(input, normalized, error);
 }
 
 // Shared settings list used by both the device settings UI and the web settings API.
@@ -370,6 +393,13 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
               KOREADER_STORE.saveToFile();
             },
             "koSyncBehavior", StrId::STR_KOREADER_SYNC),
+        // --- Google Drive Sync (web-only, uses GoogleDriveStore) ---
+        SettingInfo::DynamicString(StrId::STR_GDRIVE_FOLDER_ID, &gdriveGetFolderId, &gdriveSetFolderId,
+                                   "gdriveFolderId", StrId::STR_GDRIVE_SYNC),
+        SettingInfo::DynamicString(StrId::STR_GDRIVE_API_KEY, &gdriveGetApiKey, &gdriveSetApiKey, "gdriveApiKey",
+                                   StrId::STR_GDRIVE_SYNC),
+        SettingInfo::DynamicDirectory(StrId::STR_GDRIVE_LOCAL_FOLDER, &gdriveGetLocalFolder, &gdriveSetLocalFolder,
+                                      &gdriveValidateLocalFolder, "gdriveLocalFolder", StrId::STR_GDRIVE_SYNC),
         // --- Status Bar Settings (web-only, uses StatusBarSettingsActivity) ---
         SettingInfo::Toggle(StrId::STR_CHAPTER_PAGE_COUNT, &CrossPointSettings::statusBarChapterPageCount,
                             "statusBarChapterPageCount", StrId::STR_CUSTOMISE_STATUS_BAR),
