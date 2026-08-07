@@ -61,7 +61,10 @@ for root, _, files in os.walk(SRC_DIR):
 
             # Compress with gzip (compresslevel 9 is maximum compression)
             # IMPORTANT: we don't use brotli because Firefox doesn't support brotli with insecured context (only supported on HTTPS)
-            compressed = gzip.compress(processed.encode('utf-8'), compresslevel=9)
+            # Keep generated headers byte-identical across builds. The default
+            # gzip timestamp depends on the Python version and current time,
+            # which otherwise changes firmware.bin without a source change.
+            compressed = gzip.compress(processed.encode('utf-8'), compresslevel=9, mtime=0)
 
             # Create valid C identifier from filename
             # Use appropriate suffix based on file type
