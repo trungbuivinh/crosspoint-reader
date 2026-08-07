@@ -11,11 +11,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <unordered_map>
 
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
 #include "OpdsServerStore.h"
+#include "ReaderFontSizes.h"
 #include "SdCardFontSystem.h"
 #include "SettingsList.h"
 #include "WebDAVHandler.h"
@@ -80,6 +82,41 @@ bool isProtectedItemName(const String& name) {
     }
   }
   return false;
+}
+
+uint8_t getWebFontFamilyValue(const SdCardFontRegistry& registry) {
+  const auto& families = registry.getFamilies();
+  if (SETTINGS.sdFontFamilyName[0] != '\0') {
+    for (size_t index = 0; index < families.size(); ++index) {
+      if (families[index].name == SETTINGS.sdFontFamilyName) {
+        return static_cast<uint8_t>(CrossPointSettings::BUILTIN_FONT_COUNT + index);
+      }
+    }
+  }
+  return SETTINGS.fontFamily < CrossPointSettings::BUILTIN_FONT_COUNT ? SETTINGS.fontFamily : 0;
+}
+
+void setWebFontFamilyValue(const uint8_t value, const SdCardFontRegistry& registry) {
+  if (value < CrossPointSettings::BUILTIN_FONT_COUNT) {
+    SETTINGS.fontFamily = value;
+    SETTINGS.sdFontFamilyName[0] = '\0';
+    return;
+  }
+
+  const size_t sdIndex = value - CrossPointSettings::BUILTIN_FONT_COUNT;
+  const auto& families = registry.getFamilies();
+  if (sdIndex >= families.size()) return;
+
+  strncpy(SETTINGS.sdFontFamilyName, families[sdIndex].name.c_str(), sizeof(SETTINGS.sdFontFamilyName) - 1);
+  SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
+}
+
+uint8_t getWebFontSizeValue(const std::vector<uint8_t>& sizes) {
+  const uint8_t pointSize = snapToNearestPointSize(sizes, SETTINGS.fontPointSize);
+  for (size_t index = 0; index < sizes.size(); ++index) {
+    if (sizes[index] == pointSize) return static_cast<uint8_t>(index);
+  }
+  return 0;
 }
 }  // namespace
 
@@ -1165,10 +1202,12 @@ void CrossPointWebServer::handleSettingsPage() const {
 }
 
 void CrossPointWebServer::handleGetSettings() const {
-  // Pass the SD font registry so the fontFamily setting's enumStringValues
-  // includes SD-resident families — otherwise the web API only exposes the
-  // three built-in fonts.
-  const auto& settings = getSettingsList(&sdFontSystem.registry());
+  // Borrow the constructed-once base list. Copying the full settings vector
+  // after Wi-Fi has fragmented the heap can require a contiguous block large
+  // enough to abort this constrained device.
+  const auto& settings = getBaseSettingsList();
+  const auto& fontRegistry = sdFontSystem.registry();
+  const std::vector<uint8_t> fontSizes = readerFontPointSizes(&fontRegistry, SETTINGS.sdFontFamilyName);
 
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   server->send(200, "application/json", "");
@@ -1180,7 +1219,7 @@ void CrossPointWebServer::handleGetSettings() const {
   JsonDocument doc;
 
   for (const auto& s : settings) {
-    if (!s.key) continue;  // Skip ACTION-only entries
+    if (!s.key || !isSettingAvailableForCurrentBoard(s)) continue;
 
     doc.clear();
     doc["key"] = s.key;
@@ -1197,13 +1236,24 @@ void CrossPointWebServer::handleGetSettings() const {
       }
       case SettingType::ENUM: {
         doc["type"] = "enum";
-        if (s.valuePtr) {
+        const bool isFontFamily = s.nameId == StrId::STR_FONT_FAMILY;
+        const bool isFontSize = s.nameId == StrId::STR_FONT_SIZE;
+        if (isFontFamily) {
+          doc["value"] = static_cast<int>(getWebFontFamilyValue(fontRegistry));
+        } else if (isFontSize) {
+          doc["value"] = static_cast<int>(getWebFontSizeValue(fontSizes));
+        } else if (s.valuePtr) {
           doc["value"] = static_cast<int>(SETTINGS.*(s.valuePtr));
         } else if (s.valueGetter) {
           doc["value"] = static_cast<int>(s.valueGetter());
         }
         JsonArray options = doc["options"].to<JsonArray>();
-        if (!s.enumStringValues.empty()) {
+        if (isFontFamily) {
+          for (const auto option : s.enumValues) options.add(I18N.get(option));
+          for (const auto& family : fontRegistry.getFamilies()) options.add(family.name);
+        } else if (isFontSize) {
+          for (const uint8_t pointSize : fontSizes) options.add(std::to_string(pointSize) + " pt");
+        } else if (!s.enumStringValues.empty()) {
           for (const auto& opt : s.enumStringValues) {
             options.add(opt);
           }
@@ -1279,10 +1329,15 @@ void CrossPointWebServer::handlePostSettings() {
     return;
   }
 
-  const auto& settings = getSettingsList(&sdFontSystem.registry());
+  const auto& settings = getBaseSettingsList();
+  const auto& fontRegistry = sdFontSystem.registry();
+  const std::vector<uint8_t> fontSizes = readerFontPointSizes(&fontRegistry, SETTINGS.sdFontFamilyName);
   std::unordered_map<std::string, std::string> normalizedDirectories;
   for (const auto& s : settings) {
-    if (!s.key || s.type != SettingType::DIRECTORY || !doc[s.key].is<JsonVariant>()) continue;
+    if (!s.key || !isSettingAvailableForCurrentBoard(s) || s.type != SettingType::DIRECTORY ||
+        !doc[s.key].is<JsonVariant>()) {
+      continue;
+    }
     if (!doc[s.key].is<const char*>() && !doc[s.key].is<std::string>()) {
       server->send(400, "text/plain", String("Invalid directory value for ") + s.key);
       return;
@@ -1299,7 +1354,7 @@ void CrossPointWebServer::handlePostSettings() {
   int applied = 0;
 
   for (const auto& s : settings) {
-    if (!s.key) continue;
+    if (!s.key || !isSettingAvailableForCurrentBoard(s)) continue;
     if (!doc[s.key].is<JsonVariant>()) continue;
 
     switch (s.type) {
@@ -1313,10 +1368,19 @@ void CrossPointWebServer::handlePostSettings() {
       }
       case SettingType::ENUM: {
         const int val = doc[s.key].as<int>();
-        const int maxVal = s.enumStringValues.empty() ? static_cast<int>(s.enumValues.size())
-                                                      : static_cast<int>(s.enumStringValues.size());
+        const bool isFontFamily = s.nameId == StrId::STR_FONT_FAMILY;
+        const bool isFontSize = s.nameId == StrId::STR_FONT_SIZE;
+        const int maxVal =
+            isFontFamily ? static_cast<int>(CrossPointSettings::BUILTIN_FONT_COUNT + fontRegistry.getFamilyCount())
+            : isFontSize ? static_cast<int>(fontSizes.size())
+            : s.enumStringValues.empty() ? static_cast<int>(s.enumValues.size())
+                                         : static_cast<int>(s.enumStringValues.size());
         if (val >= 0 && val < maxVal) {
-          if (s.valuePtr) {
+          if (isFontFamily) {
+            setWebFontFamilyValue(static_cast<uint8_t>(val), fontRegistry);
+          } else if (isFontSize) {
+            SETTINGS.fontPointSize = fontSizes[static_cast<size_t>(val)];
+          } else if (s.valuePtr) {
             SETTINGS.*(s.valuePtr) = static_cast<uint8_t>(val);
           } else if (s.valueSetter) {
             s.valueSetter(static_cast<uint8_t>(val));

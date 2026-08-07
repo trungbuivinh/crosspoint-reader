@@ -205,14 +205,12 @@ inline bool gdriveValidateLocalFolder(const std::string& input, std::string& nor
 // Each entry has a key (for JSON API) and category (for grouping).
 // ACTION-type entries and entries without a key are device-only.
 //
-// The static list is constructed exactly once (master's optimization, #1086 +
-// #1636) so the per-entry SettingInfo cost is paid once; every call then copies
-// it. When an SdCardFontRegistry is supplied AND has SD card fonts installed,
-// the font-family entry is replaced in that copy with a registry-aware version.
-// The font-size entry is always rebuilt, since its options are point sizes read
-// from the active family rather than a fixed enum.
-inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* registry = nullptr,
-                                                const std::vector<DictionaryEntry>* dictionaries = nullptr) {
+// The base list is constructed exactly once (master's optimization, #1086 +
+// #1636). Web handlers borrow this list directly so bringing up Wi-Fi never
+// requires a large contiguous copy from an already-fragmented heap. The device
+// settings UI uses getSettingsList() below to make the small, intentional copy
+// it needs for runtime font, dictionary, and board-specific entries.
+inline const std::vector<SettingInfo>& getBaseSettingsList() {
   static const std::vector<SettingInfo> baseList = [] {
     // Enum settings are persisted as numeric values. Assign these labels by enum
     // value so a reordered menu or enum cannot silently swap their behavior.
@@ -448,7 +446,21 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
     return v;
   }();
 
-  std::vector<SettingInfo> v = baseList;
+  return baseList;
+}
+
+inline bool isSettingAvailableForCurrentBoard(const SettingInfo& setting) {
+  if (!BoardConfig::hasTouch() && setting.nameId == StrId::STR_TOUCH_READER_CONTROLS) return false;
+  if (BoardConfig::hasTouch() &&
+      (setting.nameId == StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION || setting.nameId == StrId::STR_SUNLIGHT_FADING_FIX)) {
+    return false;
+  }
+  return true;
+}
+
+inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* registry = nullptr,
+                                                const std::vector<DictionaryEntry>* dictionaries = nullptr) {
+  std::vector<SettingInfo> v = getBaseSettingsList();
   if (!BoardConfig::hasTouch()) {
     v.erase(std::remove_if(v.begin(), v.end(),
                            [](const SettingInfo& s) { return s.nameId == StrId::STR_TOUCH_READER_CONTROLS; }),
