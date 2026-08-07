@@ -8,7 +8,13 @@
 #include "fontIds.h"
 
 namespace {
-constexpr int MENU_ITEM_COUNT = 3;
+constexpr int MENU_ITEM_COUNT = 4;
+constexpr NetworkMode MENU_MODES[MENU_ITEM_COUNT] = {
+    NetworkMode::JOIN_NETWORK,
+    NetworkMode::CONNECT_CALIBRE,
+    NetworkMode::CREATE_HOTSPOT,
+    NetworkMode::GOOGLE_DRIVE,
+};
 }  // namespace
 
 void NetworkModeSelectionActivity::onEnter() {
@@ -24,15 +30,7 @@ void NetworkModeSelectionActivity::onEnter() {
 void NetworkModeSelectionActivity::onExit() { Activity::onExit(); }
 
 void NetworkModeSelectionActivity::loop() {
-  auto selectCurrent = [this] {
-    NetworkMode mode = NetworkMode::JOIN_NETWORK;
-    if (selectedIndex == 1) {
-      mode = NetworkMode::CONNECT_CALIBRE;
-    } else if (selectedIndex == 2) {
-      mode = NetworkMode::CREATE_HOTSPOT;
-    }
-    onModeSelected(mode);
-  };
+  auto selectCurrent = [this] { onModeSelected(MENU_MODES[selectedIndex]); };
 
   // Handle back button - cancel
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
@@ -85,10 +83,11 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
   const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
   // Menu items and descriptions
   static constexpr StrId menuItems[MENU_ITEM_COUNT] = {StrId::STR_JOIN_NETWORK, StrId::STR_CALIBRE_WIRELESS,
-                                                       StrId::STR_CREATE_HOTSPOT};
+                                                       StrId::STR_CREATE_HOTSPOT, StrId::STR_GDRIVE};
   static constexpr StrId menuDescs[MENU_ITEM_COUNT] = {StrId::STR_JOIN_DESC, StrId::STR_CALIBRE_DESC,
-                                                       StrId::STR_HOTSPOT_DESC};
-  static constexpr UIIcon menuIcons[MENU_ITEM_COUNT] = {UIIcon::Wifi, UIIcon::Library, UIIcon::Hotspot};
+                                                       StrId::STR_HOTSPOT_DESC, StrId::STR_GDRIVE_DESC};
+  static constexpr UIIcon menuIcons[MENU_ITEM_COUNT] = {UIIcon::Wifi, UIIcon::Library, UIIcon::Hotspot,
+                                                        UIIcon::GoogleDrive};
 
   GUI.drawList(
       renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(MENU_ITEM_COUNT), selectedIndex,

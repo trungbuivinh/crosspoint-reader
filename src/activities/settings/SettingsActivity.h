@@ -10,7 +10,7 @@
 #include "components/OptionPopup.h"
 #include "util/ButtonNavigator.h"
 
-enum class SettingType { TOGGLE, ENUM, ACTION, VALUE, STRING };
+enum class SettingType { TOGGLE, ENUM, ACTION, VALUE, STRING, DIRECTORY };
 
 enum class SettingAction {
   None,
@@ -56,6 +56,7 @@ struct SettingInfo {
   std::function<void(uint8_t)> valueSetter;
   std::function<std::string()> stringGetter;
   std::function<void(const std::string&)> stringSetter;
+  std::function<bool(const std::string&, std::string&, std::string&)> stringValidator;
 
   SettingInfo& withObfuscated() {
     obfuscated = true;
@@ -144,6 +145,21 @@ struct SettingInfo {
     s.type = SettingType::STRING;
     s.stringGetter = std::move(getter);
     s.stringSetter = std::move(setter);
+    s.key = key;
+    s.category = category;
+    return s;
+  }
+
+  static SettingInfo DynamicDirectory(StrId nameId, std::function<std::string()> getter,
+                                      std::function<void(const std::string&)> setter,
+                                      std::function<bool(const std::string&, std::string&, std::string&)> validator,
+                                      const char* key = nullptr, StrId category = StrId::STR_NONE_OPT) {
+    SettingInfo s;
+    s.nameId = nameId;
+    s.type = SettingType::DIRECTORY;
+    s.stringGetter = std::move(getter);
+    s.stringSetter = std::move(setter);
+    s.stringValidator = std::move(validator);
     s.key = key;
     s.category = category;
     return s;

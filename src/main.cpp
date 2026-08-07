@@ -16,11 +16,13 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <builtinFonts/all.h>
+#include <esp_ota_ops.h>
 
 #include <cstring>
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "GoogleDriveStore.h"
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
@@ -42,6 +44,29 @@ FontDecompressor fontDecompressor;
 SdCardFontSystem sdFontSystem;
 FontCacheManager fontCacheManager(renderer.getFontMap(), renderer.getSdCardFonts());
 static unsigned long allowSleepAt = 0;
+
+// Override Arduino's weak hook so a newly flashed image is not marked valid
+// before setup() has exercised the hardware and installed a usable activity.
+extern "C" bool verifyRollbackLater() { return true; }
+
+namespace {
+
+void confirmOtaImageIfPending() {
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  esp_ota_img_states_t state;
+  if (!running || esp_ota_get_state_partition(running, &state) != ESP_OK || state != ESP_OTA_IMG_PENDING_VERIFY) {
+    return;
+  }
+
+  const esp_err_t result = esp_ota_mark_app_valid_cancel_rollback();
+  if (result == ESP_OK) {
+    LOG_INF("OTA", "Boot verification passed; rollback cancelled");
+  } else {
+    LOG_ERR("OTA", "Failed to confirm running OTA image: %s", esp_err_to_name(result));
+  }
+}
+
+}  // namespace
 
 // Fonts
 EpdFont notoserif14RegularFont(&notoserif_14_regular);
@@ -301,6 +326,10 @@ void setup() {
     LOG_ERR("MAIN", "SD card initialization failed");
     setupDisplayAndFonts(isSilentReboot);
     activityManager.goToFullScreenMessage("SD card error", EpdFontFamily::BOLD);
+    // Missing/removable media is not a firmware boot failure. The display and
+    // recovery UI are alive, so retaining this image is safer than bouncing
+    // between OTA slots whenever the SD card is absent.
+    confirmOtaImageIfPending();
     return;
   }
 
@@ -312,6 +341,7 @@ void setup() {
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();
+  GDRIVE_STORE.loadFromFile();
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 
@@ -433,6 +463,11 @@ void setup() {
     APP_STATE.saveToFile();
     activityManager.goToReader(path, allowFastInitialReaderRefresh);
   }
+
+  // The new image reached storage/settings initialization, display setup, and
+  // activity routing. Only now make the boot slot permanent; a panic before
+  // this point leaves it pending so the bootloader can roll back.
+  confirmOtaImageIfPending();
 
   if (resume == BootResume::Silent) {
     // Block until the first paint physically completes. refreshDisplay()

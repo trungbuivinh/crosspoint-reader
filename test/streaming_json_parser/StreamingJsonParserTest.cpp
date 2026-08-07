@@ -352,7 +352,7 @@ TEST(StreamingJsonParser, ArrayOfStrings) {
   EXPECT_EQ(events[4].type, EventType::ARRAY_END);
 }
 
-TEST(StreamingJsonParser, TruncatedInputNoCrash) {
+TEST(StreamingJsonParser, TruncatedInputFailsFinalization) {
   const char* truncated[] = {
       R"({"key": "val)", R"({"key": )",  R"({"key)",     R"([1, 2, )",
       R"({"a": tru)",    R"({"a": fal)", R"({"a": nul)", R"({"a": "hello\)",
@@ -362,9 +362,29 @@ TEST(StreamingJsonParser, TruncatedInputNoCrash) {
     TestContext ctx;
     StreamingJsonParser parser(makeCallbacks(&ctx));
     parser.feed(json, strlen(json));
-    // Just verify no crash; partial results are acceptable
+    EXPECT_FALSE(parser.finish()) << json;
+    EXPECT_TRUE(parser.hasError()) << json;
   }
-  SUCCEED();
+}
+
+TEST(StreamingJsonParser, MismatchedContainerFailsClosed) {
+  for (const char* json : {R"({])", R"([})"}) {
+    TestContext ctx;
+    StreamingJsonParser parser(makeCallbacks(&ctx));
+    parser.feed(json, strlen(json));
+    EXPECT_FALSE(parser.finish()) << json;
+    EXPECT_TRUE(parser.hasError()) << json;
+  }
+}
+
+TEST(StreamingJsonParser, CompleteDocumentFinalizes) {
+  const char* json = R"({"key":[1,true,null]})";
+  TestContext ctx;
+  StreamingJsonParser parser(makeCallbacks(&ctx));
+  parser.feed(json, strlen(json));
+
+  EXPECT_TRUE(parser.finish());
+  EXPECT_FALSE(parser.hasError());
 }
 
 TEST(StreamingJsonParser, AllEscapeSequences) {

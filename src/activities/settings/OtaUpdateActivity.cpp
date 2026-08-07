@@ -4,6 +4,8 @@
 #include <I18n.h>
 #include <WiFi.h>
 
+#include <cstdio>
+
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -12,6 +14,12 @@
 #include "network/OtaUpdater.h"
 
 namespace {
+constexpr int UPDATE_SOURCE_COUNT = 2;
+
+const char* getUpdateSourceLabel(const OtaUpdateSource source) {
+  return source == OtaUpdateSource::Official ? tr(STR_OFFICIAL) : tr(STR_CUSTOM_BY_TRUNG_BUI);
+}
+
 struct OtaActionRects {
   Rect cancel;
   Rect update;
@@ -28,6 +36,21 @@ bool contains(const Rect& rect, const int x, const int y) {
 }
 }  // namespace
 
+void OtaUpdateActivity::beginWifiSelection() {
+  {
+    RenderLock lock(*this);
+    updateSource = selectedSourceIndex == 0 ? OtaUpdateSource::Official : OtaUpdateSource::Custom;
+    state = WIFI_SELECTION;
+  }
+
+  LOG_DBG("OTA", "Selected %s update source; turning on WiFi",
+          updateSource == OtaUpdateSource::Official ? "official" : "custom");
+  WiFi.mode(WIFI_STA);
+
+  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                         [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
+}
+
 void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
   if (!success) {
     LOG_ERR("OTA", "WiFi connection failed, exiting");
@@ -43,7 +66,7 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
   }
   requestUpdateAndWait();
 
-  const auto res = updater.checkForUpdate();
+  const auto res = updater.checkForUpdate(updateSource);
   if (res != OtaUpdater::OK) {
     LOG_DBG("OTA", "Update check failed: %d", res);
     {
@@ -71,14 +94,15 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
 void OtaUpdateActivity::onEnter() {
   Activity::onEnter();
 
-  // Turn on WiFi immediately
-  LOG_DBG("OTA", "Turning on WiFi...");
-  WiFi.mode(WIFI_STA);
-
-  // Launch WiFi selection subactivity
-  LOG_DBG("OTA", "Launching WifiSelectionActivity...");
-  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                         [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
+  {
+    RenderLock lock(*this);
+    state = SOURCE_SELECTION;
+    selectedSourceIndex = 1;
+    updateSource = OtaUpdateSource::Custom;
+    lastUpdaterPercentage = UNINITIALIZED_PERCENTAGE;
+    failedDetail = nullptr;
+  }
+  requestUpdate();
 }
 
 void OtaUpdateActivity::onExit() {
@@ -102,13 +126,30 @@ void OtaUpdateActivity::render(RenderLock&&) {
 
   renderer.clearScreen();
 
+  if (state == SOURCE_SELECTION) {
+    GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_UPDATE_SOURCE));
+
+    const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+    const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
+    GUI.drawList(
+        renderer, Rect{0, contentTop, pageWidth, contentHeight}, UPDATE_SOURCE_COUNT, selectedSourceIndex,
+        [](const int index) {
+          return std::string(getUpdateSourceLabel(index == 0 ? OtaUpdateSource::Official : OtaUpdateSource::Custom));
+        });
+
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer();
+    return;
+  }
+
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_UPDATE));
   const auto height = renderer.getLineHeight(UI_10_FONT_ID);
   const auto top = (pageHeight - height) / 2;
 
   float updaterProgress = 0;
   if (state == UPDATE_IN_PROGRESS) {
-    LOG_DBG("OTA", "Update progress: %d / %d", updater.getProcessedSize(), updater.getTotalSize());
+    LOG_DBG("OTA", "Update progress: %zu / %zu", updater.getProcessedSize(), updater.getTotalSize());
     updaterProgress = static_cast<float>(updater.getProcessedSize()) / static_cast<float>(updater.getTotalSize());
     // Only update every 2% at the most
     if (static_cast<int>(updaterProgress * 50) == lastUpdaterPercentage / 2) {
@@ -120,11 +161,19 @@ void OtaUpdateActivity::render(RenderLock&&) {
   if (state == CHECKING_FOR_UPDATE) {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_CHECKING_UPDATE));
   } else if (state == WAITING_CONFIRMATION) {
+    char detailLine[128];
+
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_NEW_UPDATE), true, EpdFontFamily::BOLD);
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, top + height + metrics.verticalSpacing,
-                      (std::string(tr(STR_CURRENT_VERSION)) + CROSSPOINT_VERSION).c_str());
+    snprintf(detailLine, sizeof(detailLine), "%s: %s", tr(STR_UPDATE_SOURCE), getUpdateSourceLabel(updateSource));
+    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, top + height + metrics.verticalSpacing, detailLine);
+
+    snprintf(detailLine, sizeof(detailLine), "%s%s", tr(STR_CURRENT_VERSION), CROSSPOINT_VERSION);
     renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, top + height * 2 + metrics.verticalSpacing * 2,
-                      (std::string(tr(STR_NEW_VERSION)) + updater.getLatestVersion()).c_str());
+                      detailLine);
+
+    snprintf(detailLine, sizeof(detailLine), "%s%s", tr(STR_NEW_VERSION), updater.getLatestVersion().c_str());
+    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, top + height * 3 + metrics.verticalSpacing * 3,
+                      detailLine);
 
     if (mappedInput.hasTouch()) {
       const auto actionRects = getOtaActionRects(renderer);
@@ -214,6 +263,55 @@ void OtaUpdateActivity::runUpdateInstall() {
 }
 
 void OtaUpdateActivity::loop() {
+  if (state == SOURCE_SELECTION) {
+    auto selectCurrent = [this] { beginWifiSelection(); };
+
+    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+      finish();
+      return;
+    }
+
+    if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+      selectCurrent();
+      return;
+    }
+
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+    const int contentHeight =
+        renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
+    ListTouchResult touchResult;
+    {
+      RenderLock lock(*this);
+      touchResult = handleListTouch(selectedSourceIndex, UPDATE_SOURCE_COUNT, contentTop, contentHeight, false);
+    }
+    switch (touchResult) {
+      case ListTouchResult::Activated:
+        selectCurrent();
+        return;
+      case ListTouchResult::Consumed:
+        return;
+      case ListTouchResult::None:
+        break;
+    }
+
+    buttonNavigator.onNext([this] {
+      {
+        RenderLock lock(*this);
+        selectedSourceIndex = ButtonNavigator::nextIndex(selectedSourceIndex, UPDATE_SOURCE_COUNT);
+      }
+      requestUpdate();
+    });
+    buttonNavigator.onPrevious([this] {
+      {
+        RenderLock lock(*this);
+        selectedSourceIndex = ButtonNavigator::previousIndex(selectedSourceIndex, UPDATE_SOURCE_COUNT);
+      }
+      requestUpdate();
+    });
+    return;
+  }
+
   if (state == WAITING_CONFIRMATION) {
     int x = 0;
     int y = 0;

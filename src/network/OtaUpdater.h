@@ -1,13 +1,16 @@
 #pragma once
 
+#include <atomic>
 #include <string>
+
+#include "OtaRelease.h"
 
 class OtaUpdater {
   bool updateAvailable = false;
   std::string latestVersion;
   std::string otaUrl;
   size_t otaSize = 0;
-  size_t processedSize = 0;
+  std::atomic_size_t processedSize{0};
   size_t totalSize = 0;
 
  public:
@@ -26,13 +29,13 @@ class OtaUpdater {
 
   size_t getOtaSize() const { return otaSize; }
 
-  size_t getProcessedSize() const { return processedSize; }
+  size_t getProcessedSize() const { return processedSize.load(std::memory_order_relaxed); }
 
   size_t getTotalSize() const { return totalSize; }
 
   OtaUpdater() = default;
   bool isUpdateNewer() const;
   const std::string& getLatestVersion() const;
-  OtaUpdaterError checkForUpdate();
+  OtaUpdaterError checkForUpdate(OtaUpdateSource source);
   OtaUpdaterError installUpdate(ProgressCallback onProgress = nullptr, void* ctx = nullptr);
 };
