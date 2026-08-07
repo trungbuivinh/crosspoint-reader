@@ -152,8 +152,7 @@ void BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const si
 
   // Draw percentage text centered below bar
   const std::string percentText = std::to_string(percent) + "%";
-  renderer.drawCenteredText(UI_10_FONT_ID, rect.y + rect.height + progressPercentageLabelOffset,
-                            percentText.c_str());
+  renderer.drawCenteredText(UI_10_FONT_ID, rect.y + rect.height + progressPercentageLabelOffset, percentText.c_str());
 }
 
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,

@@ -38,9 +38,8 @@ TEST(OtaVersion, CurrentBuildSuffixIsAccepted) {
 }
 
 TEST(OtaVersion, MalformedCandidateIsRejected) {
-  constexpr const char* malformedVersions[] = {"",        "1.2",         "1.2.3.4.5", "vv1.2.3", "1.2.x",
-                                               "1..2.3",  "1.2.3-rc",    "v",           "1.2.3.4.",
-                                               "4294967296.0.0"};
+  constexpr const char* malformedVersions[] = {"",       "1.2",      "1.2.3.4.5", "vv1.2.3",  "1.2.x",
+                                               "1..2.3", "1.2.3-rc", "v",         "1.2.3.4.", "4294967296.0.0"};
   for (const char* version : malformedVersions) {
     EXPECT_EQ(OtaVersion::compare("1.2.3", version), Comparison::Invalid) << version;
   }
