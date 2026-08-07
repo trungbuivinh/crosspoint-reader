@@ -5,8 +5,10 @@
 // ip4_addr.h unless seen first. Pin this order; clang-format would otherwise sort
 // the local header last and break the build.
 #include "HttpDownloader.h"
+#include "OtaRelease.h"
 #include "OtaVersion.h"
 #include <Logging.h>
+#include <Memory.h>
 #include <ReleaseJsonParser.h>
 #include <esp_ota_ops.h>
 #include <esp_wifi.h>
@@ -18,25 +20,15 @@
 
 #include "FirmwareFlasher.h"
 
-namespace {
-constexpr char officialLatestReleaseUrl[] =
-    "https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/latest";
-constexpr char customLatestReleaseUrl[] = "https://api.github.com/repos/trungbuivinh/crosspoint-reader/releases/latest";
-
-const char* getLatestReleaseUrl(const OtaUpdateSource source) {
-  return source == OtaUpdateSource::Official ? officialLatestReleaseUrl : customLatestReleaseUrl;
-}
-}  // namespace
-
 OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate(const OtaUpdateSource source) {
   updateAvailable = false;
   latestVersion.clear();
   otaUrl.clear();
   otaSize = 0;
-  processedSize = 0;
+  processedSize.store(0, std::memory_order_relaxed);
   totalSize = 0;
 
-  const char* latestReleaseUrl = getLatestReleaseUrl(source);
+  const char* latestReleaseUrl = OtaRelease::latestReleaseUrl(source);
   LOG_DBG("OTA", "Checking %s source for update (current: %s)",
           source == OtaUpdateSource::Official ? "official" : "custom", CROSSPOINT_VERSION);
 
@@ -45,37 +37,50 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate(const OtaUpdateSource sou
   // on top of the TLS session's heap during the fetch; with -fno-exceptions an
   // OOM there aborts. fetchUrl handles the verified-https GET, redirects, and
   // User-Agent (see HttpDownloader).
-  ReleaseJsonParser releaseParser;
+  auto releaseParser = makeUniqueNoThrow<ReleaseJsonParser>();
+  if (!releaseParser) {
+    LOG_ERR("OTA", "OOM allocating release response parser");
+    return OOM_ERROR;
+  }
   const bool ok = HttpDownloader::fetchUrl(latestReleaseUrl, [&releaseParser](const uint8_t* data, size_t len) {
-    releaseParser.feed(reinterpret_cast<const char*>(data), len);
+    releaseParser->feed(reinterpret_cast<const char*>(data), len);
     return true;
   });
   if (!ok) {
     LOG_ERR("OTA", "Release check fetch failed");
     return HTTP_ERROR;
   }
+  if (!releaseParser->finish()) {
+    LOG_ERR("OTA", "Incomplete or malformed release JSON");
+    return JSON_PARSE_ERROR;
+  }
 
-  LOG_DBG("OTA", "Parser results: tag=%s firmware=%s", releaseParser.foundTag() ? "yes" : "no",
-          releaseParser.foundFirmware() ? "yes" : "no");
+  LOG_DBG("OTA", "Parser results: tag=%s firmware=%s", releaseParser->foundTag() ? "yes" : "no",
+          releaseParser->foundFirmware() ? "yes" : "no");
 
-  if (!releaseParser.foundTag()) {
+  if (!releaseParser->foundTag()) {
     LOG_ERR("OTA", "No tag_name in release JSON");
     return JSON_PARSE_ERROR;
   }
 
-  if (!releaseParser.foundFirmware()) {
-    LOG_ERR("OTA", "No firmware.bin asset found");
-    return NO_UPDATE;
-  }
-
-  if (OtaVersion::compare(CROSSPOINT_VERSION, releaseParser.getTagName()) == OtaVersion::Comparison::Invalid) {
-    LOG_ERR("OTA", "Malformed release tag: %s", releaseParser.getTagName());
+  if (!releaseParser->foundFirmware()) {
+    LOG_ERR("OTA", "Missing or empty firmware.bin asset");
     return JSON_PARSE_ERROR;
   }
 
-  latestVersion = releaseParser.getTagName();
-  otaUrl = releaseParser.getFirmwareUrl();
-  otaSize = releaseParser.getFirmwareSize();
+  if (OtaVersion::compare(CROSSPOINT_VERSION, releaseParser->getTagName()) == OtaVersion::Comparison::Invalid) {
+    LOG_ERR("OTA", "Malformed release tag: %s", releaseParser->getTagName());
+    return JSON_PARSE_ERROR;
+  }
+
+  if (!OtaRelease::isExpectedFirmwareUrl(source, releaseParser->getFirmwareUrl(), releaseParser->getTagName())) {
+    LOG_ERR("OTA", "Firmware asset URL does not match the selected source");
+    return JSON_PARSE_ERROR;
+  }
+
+  latestVersion = releaseParser->getTagName();
+  otaUrl = releaseParser->getFirmwareUrl();
+  otaSize = releaseParser->getFirmwareSize();
   totalSize = otaSize;
   updateAvailable = true;
 
@@ -106,9 +111,13 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
     LOG_ERR("OTA", "No OTA partition available");
     return INTERNAL_UPDATE_ERROR;
   }
+  if (otaSize == 0 || otaSize > updatePartition->size) {
+    LOG_ERR("OTA", "Firmware size %zu exceeds OTA partition %zu", otaSize, static_cast<size_t>(updatePartition->size));
+    return INTERNAL_UPDATE_ERROR;
+  }
 
   esp_ota_handle_t otaHandle = 0;
-  esp_err_t esp_err = esp_ota_begin(updatePartition, OTA_SIZE_UNKNOWN, &otaHandle);
+  esp_err_t esp_err = esp_ota_begin(updatePartition, otaSize, &otaHandle);
   if (esp_err != ESP_OK) {
     LOG_ERR("OTA", "esp_ota_begin failed: %s", esp_err_to_name(esp_err));
     return INTERNAL_UPDATE_ERROR;
@@ -117,7 +126,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
   /* For better timing and connectivity, we disable power saving for WiFi */
   esp_wifi_set_ps(WIFI_PS_NONE);
 
-  processedSize = 0;
+  processedSize.store(0, std::memory_order_relaxed);
   int lastReportedPct = -1;
   bool flashOk = true;
   // The image streams in chunks; only the first bytes carry the header. Buffer
@@ -126,6 +135,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
   uint8_t hdr[14];
   size_t hdrLen = 0;
   bool wrongChip = false;
+  bool sizeMismatch = false;
   const bool fetchOk = HttpDownloader::fetchUrl(otaUrl, [&](const uint8_t* data, size_t len) {
     if (hdrLen < sizeof(hdr)) {
       const size_t take = std::min(len, sizeof(hdr) - hdrLen);
@@ -142,16 +152,21 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
         }
       }
     }
+    const size_t currentSize = processedSize.load(std::memory_order_relaxed);
+    if (currentSize > otaSize || len > otaSize - currentSize) {
+      sizeMismatch = true;
+      return false;
+    }
     if (esp_ota_write(otaHandle, data, len) != ESP_OK) {
       flashOk = false;
       return false;  // abort the transfer
     }
-    processedSize += len;
+    const size_t downloadedSize = processedSize.fetch_add(len, std::memory_order_relaxed) + len;
     // Fire the callback only on whole-percent change. Per-chunk updates wake the
     // render task, whose framebuffer work contends with TLS on the internal arena,
     // and e-ink can't repaint faster than a percent tick anyway.
     if (onProgress && totalSize > 0) {
-      const int pct = static_cast<int>(static_cast<uint64_t>(processedSize) * 100 / totalSize);
+      const int pct = static_cast<int>(static_cast<uint64_t>(downloadedSize) * 100 / totalSize);
       if (pct != lastReportedPct) {
         lastReportedPct = pct;
         onProgress(ctx);
@@ -169,10 +184,23 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
     return WRONG_DEVICE_ERROR;
   }
 
+  if (sizeMismatch) {
+    LOG_ERR("OTA", "Firmware exceeded advertised size of %zu bytes", otaSize);
+    esp_ota_abort(otaHandle);
+    return INTERNAL_UPDATE_ERROR;
+  }
+
   if (!fetchOk || !flashOk) {
     LOG_ERR("OTA", "Firmware install failed (%s)", flashOk ? "download" : "flash write");
     esp_ota_abort(otaHandle);
     return flashOk ? HTTP_ERROR : INTERNAL_UPDATE_ERROR;
+  }
+
+  const size_t downloadedSize = processedSize.load(std::memory_order_relaxed);
+  if (downloadedSize != otaSize) {
+    LOG_ERR("OTA", "Firmware size mismatch: API=%zu downloaded=%zu", otaSize, downloadedSize);
+    esp_ota_abort(otaHandle);
+    return INTERNAL_UPDATE_ERROR;
   }
 
   esp_err = esp_ota_end(otaHandle);  // verifies the written image

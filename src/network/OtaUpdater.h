@@ -1,15 +1,16 @@
 #pragma once
 
+#include <atomic>
 #include <string>
 
-enum class OtaUpdateSource { Official, Custom };
+#include "OtaRelease.h"
 
 class OtaUpdater {
   bool updateAvailable = false;
   std::string latestVersion;
   std::string otaUrl;
   size_t otaSize = 0;
-  size_t processedSize = 0;
+  std::atomic_size_t processedSize{0};
   size_t totalSize = 0;
 
  public:
@@ -28,7 +29,7 @@ class OtaUpdater {
 
   size_t getOtaSize() const { return otaSize; }
 
-  size_t getProcessedSize() const { return processedSize; }
+  size_t getProcessedSize() const { return processedSize.load(std::memory_order_relaxed); }
 
   size_t getTotalSize() const { return totalSize; }
 

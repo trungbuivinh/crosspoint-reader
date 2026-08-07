@@ -383,6 +383,7 @@ TEST(ReleaseJsonParser, TruncatedInsideAssetsArray) {
   EXPECT_TRUE(p.foundTag());
   EXPECT_STREQ(p.getTagName(), "v2.4.1");
   EXPECT_FALSE(p.foundFirmware());
+  EXPECT_FALSE(p.finish());
 }
 
 TEST(ReleaseJsonParser, TruncatedAfterFirmwareName) {
@@ -563,8 +564,21 @@ TEST(ReleaseJsonParser, SizeZero) {
   ReleaseJsonParser p;
   p.feed(json, strlen(json));
 
-  EXPECT_TRUE(p.foundFirmware());
+  EXPECT_FALSE(p.foundFirmware());
   EXPECT_EQ(p.getFirmwareSize(), 0u);
+  EXPECT_TRUE(p.finish());
+}
+
+TEST(ReleaseJsonParser, CompleteFirmwareMetadataFinalizes) {
+  const char* json =
+      R"({"tag_name":"1.5.0.1","assets":[{"name":"firmware.bin","browser_download_url":"https://example/fw","size":42}]})";
+
+  ReleaseJsonParser p;
+  p.feed(json, strlen(json));
+
+  EXPECT_TRUE(p.finish());
+  EXPECT_FALSE(p.hasError());
+  EXPECT_TRUE(p.foundFirmware());
 }
 
 TEST(ReleaseJsonParser, MinimalValidJson) {

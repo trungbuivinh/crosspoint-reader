@@ -94,11 +94,14 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
 void OtaUpdateActivity::onEnter() {
   Activity::onEnter();
 
-  state = SOURCE_SELECTION;
-  selectedSourceIndex = 1;
-  updateSource = OtaUpdateSource::Custom;
-  lastUpdaterPercentage = UNINITIALIZED_PERCENTAGE;
-  failedDetail = nullptr;
+  {
+    RenderLock lock(*this);
+    state = SOURCE_SELECTION;
+    selectedSourceIndex = 1;
+    updateSource = OtaUpdateSource::Custom;
+    lastUpdaterPercentage = UNINITIALIZED_PERCENTAGE;
+    failedDetail = nullptr;
+  }
   requestUpdate();
 }
 
@@ -146,7 +149,7 @@ void OtaUpdateActivity::render(RenderLock&&) {
 
   float updaterProgress = 0;
   if (state == UPDATE_IN_PROGRESS) {
-    LOG_DBG("OTA", "Update progress: %d / %d", updater.getProcessedSize(), updater.getTotalSize());
+    LOG_DBG("OTA", "Update progress: %zu / %zu", updater.getProcessedSize(), updater.getTotalSize());
     updaterProgress = static_cast<float>(updater.getProcessedSize()) / static_cast<float>(updater.getTotalSize());
     // Only update every 2% at the most
     if (static_cast<int>(updaterProgress * 50) == lastUpdaterPercentage / 2) {
@@ -277,7 +280,12 @@ void OtaUpdateActivity::loop() {
     const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
     const int contentHeight =
         renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
-    switch (handleListTouch(selectedSourceIndex, UPDATE_SOURCE_COUNT, contentTop, contentHeight, false)) {
+    ListTouchResult touchResult;
+    {
+      RenderLock lock(*this);
+      touchResult = handleListTouch(selectedSourceIndex, UPDATE_SOURCE_COUNT, contentTop, contentHeight, false);
+    }
+    switch (touchResult) {
       case ListTouchResult::Activated:
         selectCurrent();
         return;
@@ -288,11 +296,17 @@ void OtaUpdateActivity::loop() {
     }
 
     buttonNavigator.onNext([this] {
-      selectedSourceIndex = ButtonNavigator::nextIndex(selectedSourceIndex, UPDATE_SOURCE_COUNT);
+      {
+        RenderLock lock(*this);
+        selectedSourceIndex = ButtonNavigator::nextIndex(selectedSourceIndex, UPDATE_SOURCE_COUNT);
+      }
       requestUpdate();
     });
     buttonNavigator.onPrevious([this] {
-      selectedSourceIndex = ButtonNavigator::previousIndex(selectedSourceIndex, UPDATE_SOURCE_COUNT);
+      {
+        RenderLock lock(*this);
+        selectedSourceIndex = ButtonNavigator::previousIndex(selectedSourceIndex, UPDATE_SOURCE_COUNT);
+      }
       requestUpdate();
     });
     return;

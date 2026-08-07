@@ -14,7 +14,9 @@ class ReleaseJsonParser {
 
   void reset();
   void feed(const char* data, size_t len);
+  bool finish();
 
+  bool hasError() const;
   bool foundTag() const;
   bool foundFirmware() const;
   const char* getTagName() const;

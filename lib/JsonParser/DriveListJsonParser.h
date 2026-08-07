@@ -38,6 +38,7 @@ class DriveListJsonParser {
   // Reset all state for the next response page.
   void reset();
   void feed(const char* data, size_t len);
+  bool finish() { return parser.finish(); }
 
   bool hasError() const { return parser.hasError(); }
   // Empty string when the response had no nextPageToken (last page).
