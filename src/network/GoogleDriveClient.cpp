@@ -3,6 +3,7 @@
 #include <DriveListJsonParser.h>
 #include <FsHelpers.h>
 #include <Logging.h>
+#include <Memory.h>
 
 #include <algorithm>
 #include <cctype>
@@ -16,6 +17,12 @@
 #include "util/UrlUtils.h"
 
 namespace {
+
+// Keep the initial remote snapshot small while Wi-Fi/TLS is active. On the
+// ESP32-C3, 64 DriveNode slots use 6,656 bytes; reserving all 300 slots here,
+// together with the local tree, consumed 48,000 bytes before TLS in PR #6.
+constexpr size_t INITIAL_REMOTE_TREE_RESERVE = 64;
+constexpr size_t REMOTE_TREE_RESERVE_STEP = 64;
 
 constexpr char DRIVE_FILES_URL[] = "https://www.googleapis.com/drive/v3/files";
 constexpr char DRIVE_FOLDER_MIME[] = "application/vnd.google-apps.folder";
@@ -84,12 +91,23 @@ namespace GoogleDriveClient {
 
 DriveTreeResult listTree(const std::string& folderId, const std::string& apiKey, DriveTree& out) {
   out.nodes.clear();
-  out.nodes.reserve(64);
+  out.nodes.reserve(INITIAL_REMOTE_TREE_RESERVE);
 
   std::deque<PendingFolder> pending;
   pending.push_back({folderId, "", 0});
   std::unordered_set<std::string> visited;
   visited.insert(folderId);
+
+  // Keep the large streaming parser off the 8 KiB Arduino loop stack and
+  // reuse both allocations for every response page. Page size is capped at
+  // 100 by the request below.
+  PageCollector collector;
+  collector.children.reserve(100);
+  auto parser = makeUniqueNoThrow<DriveListJsonParser>(&collector, collectChild);
+  if (!parser) {
+    LOG_ERR("GDRV", "OOM allocating Drive response parser");
+    return DriveTreeResult::OOM;
+  }
 
   while (!pending.empty()) {
     PendingFolder folder = std::move(pending.front());
@@ -109,20 +127,35 @@ DriveTreeResult listTree(const std::string& folderId, const std::string& apiKey,
         url += "&pageToken=" + UrlUtils::urlEncode(pageToken);
       }
 
-      PageCollector collector;
-      collector.children.reserve(100);
-      DriveListJsonParser parser(&collector, collectChild);
+      collector.children.clear();
+      parser->reset();
       const bool ok = HttpDownloader::fetchUrl(url, [&parser](const uint8_t* data, size_t len) {
-        parser.feed(reinterpret_cast<const char*>(data), len);
+        parser->feed(reinterpret_cast<const char*>(data), len);
         return true;
       });
       if (!ok) {
         LOG_ERR("GDRV", "Tree listing HTTP failure at %s page %d", folder.relativePath.c_str(), page);
         return DriveTreeResult::HTTP_ERROR;
       }
-      if (parser.hasError()) {
+      if (!parser->finish()) {
         LOG_ERR("GDRV", "Tree listing parse failure at %s page %d", folder.relativePath.c_str(), page);
         return DriveTreeResult::PARSE_ERROR;
+      }
+
+      const size_t managedChildCount = static_cast<size_t>(std::count_if(
+          collector.children.begin(), collector.children.end(),
+          [](const ParsedChild& child) { return isFolder(child) || (!isGoogleNative(child) && isEpub(child)); }));
+      if (managedChildCount > MAX_TREE_ENTRIES - out.nodes.size()) {
+        return DriveTreeResult::TOO_MANY_ENTRIES;
+      }
+      const size_t requiredCapacity = out.nodes.size() + managedChildCount;
+      if (requiredCapacity > out.nodes.capacity()) {
+        // fetchUrl() has already cleaned up its HTTP/TLS client. Grow in bounded
+        // steps here so std::vector never jumps from 256 to a wasteful 512 slots
+        // while the public tree limit is 300.
+        const size_t roundedCapacity =
+            ((requiredCapacity + REMOTE_TREE_RESERVE_STEP - 1) / REMOTE_TREE_RESERVE_STEP) * REMOTE_TREE_RESERVE_STEP;
+        out.nodes.reserve(std::min(roundedCapacity, MAX_TREE_ENTRIES));
       }
 
       for (const auto& child : collector.children) {
@@ -162,7 +195,7 @@ DriveTreeResult listTree(const std::string& folderId, const std::string& apiKey,
         }
       }
 
-      pageToken = parser.getNextPageToken();
+      pageToken = parser->getNextPageToken();
       page++;
     } while (!pageToken.empty());
   }
