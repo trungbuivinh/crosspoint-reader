@@ -259,6 +259,12 @@ require_text 'firmware.bin --clobber' .github/workflows/release.yml \
   'release asset upload is idempotent'
 require_text '--draft=false --prerelease=false' .github/workflows/release.yml \
   'release reruns remain stable'
+require_text 'gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}"' .github/workflows/release.yml \
+  'release lookup explicitly targets the fork'
+require_text 'firmware.bin --clobber --repo "${GITHUB_REPOSITORY}"' .github/workflows/release.yml \
+  'release upload explicitly targets the fork'
+require_text '--draft=false --prerelease=false --repo "${GITHUB_REPOSITORY}"' .github/workflows/release.yml \
+  'release publication explicitly targets the fork'
 
 if ((failures > 0)); then
   printf '\nInvariant audit failed with %d issue(s). Do not build or publish a release.\n' "${failures}" >&2
