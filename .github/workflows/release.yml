@@ -69,7 +69,20 @@ jobs:
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-${{ runner.os }}-
 
+      - name: Configure upstream audit remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          upstream_url='https://github.com/crosspoint-reader/crosspoint-reader.git'
+          if git remote get-url upstream >/dev/null 2>&1; then
+            git remote set-url upstream "${upstream_url}"
+          else
+            git remote add upstream "${upstream_url}"
+          fi
+
       - name: Audit fork invariants
+        env:
+          CROSSPOINT_DEFER_SDKCONFIG_AUDIT: "1"
         run: .claude/skills/crosspoint-upstream-release/scripts/audit_fork_invariants.sh "${GITHUB_REF_NAME}"
 
       - name: Run clang-format
@@ -92,6 +105,17 @@ jobs:
 
       - name: Build CrossPoint
         run: pio run -e gh_release
+
+      - name: Verify generated rollback configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f sdkconfig.defaults ]]; then
+            echo 'gh_release did not generate sdkconfig.defaults' >&2
+            exit 1
+          fi
+          grep -Fxq 'CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y' sdkconfig.defaults
+          grep -Fxq 'CONFIG_APP_ROLLBACK_ENABLE=y' sdkconfig.defaults
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
