@@ -203,10 +203,14 @@ require_text 'extern "C" bool verifyRollbackLater() { return true; }' src/main.c
   'early Arduino OTA confirmation is deferred'
 require_text 'esp_ota_mark_app_valid_cancel_rollback' src/main.cpp \
   'healthy boot explicitly confirms the pending image'
-require_text 'CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y' sdkconfig.defaults \
-  'bootloader rollback remains enabled'
-require_text 'CONFIG_APP_ROLLBACK_ENABLE=y' sdkconfig.defaults \
-  'application rollback remains enabled'
+if [[ ! -f sdkconfig.defaults && "${CROSSPOINT_DEFER_SDKCONFIG_AUDIT:-0}" == "1" ]]; then
+  pass 'rollback configuration verification deferred until gh_release build'
+else
+  require_text 'CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y' sdkconfig.defaults \
+    'bootloader rollback remains enabled'
+  require_text 'CONFIG_APP_ROLLBACK_ENABLE=y' sdkconfig.defaults \
+    'application rollback remains enabled'
+fi
 require_text 'data, ota' partitions.csv 'partition table retains OTA selection data'
 require_text 'app,  ota_0' partitions.csv 'partition table retains the first OTA slot'
 require_text 'app,  ota_1' partitions.csv 'partition table retains the second OTA slot'
@@ -239,6 +243,8 @@ require_text 'Validate tag matches firmware version' .github/workflows/release.y
   'release workflow validates exact tag/version equality'
 require_text 'Audit fork invariants' .github/workflows/release.yml \
   'release workflow runs the fork audit'
+require_text 'CROSSPOINT_DEFER_SDKCONFIG_AUDIT: "1"' .github/workflows/release.yml \
+  'release workflow defers generated rollback config only before building'
 require_text 'Run clang-format' .github/workflows/release.yml \
   'release workflow gates on clang-format 21'
 require_text 'Run host unit tests' .github/workflows/release.yml \
@@ -247,6 +253,8 @@ require_text 'Run cppcheck' .github/workflows/release.yml \
   'release workflow gates on cppcheck'
 require_text 'pio run -e gh_release' .github/workflows/release.yml \
   'release workflow builds the release environment'
+require_text 'Verify generated rollback configuration' .github/workflows/release.yml \
+  'release workflow verifies generated rollback config after building'
 require_text 'firmware.bin --clobber' .github/workflows/release.yml \
   'release asset upload is idempotent'
 require_text '--draft=false --prerelease=false' .github/workflows/release.yml \
